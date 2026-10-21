@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Checks the pack's collection configs: they parse, and they keep to the privacy rules.
 
-Files: prometheus/**/*.yml (scrape configs), json_exporter/*.yml and blackbox/*.yml.
+Files: prometheus/**/*.yml (scrape configs, and the demo stack's main config, which includes them
+by scrape_config_files), json_exporter/*.yml and blackbox/*.yml.
 
   python3 scripts/check_pack.py [--root DIR] [--require-promtool] [--allow-any-address]
 
@@ -38,6 +39,7 @@ being guessed at; the unit tests compare the reader with PyYAML on every config 
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import ipaddress
 import re
 import shutil
@@ -562,7 +564,12 @@ class PackChecker:
         for key in doc:
             if key not in PROMETHEUS_TOP_KEYS:
                 self.add(rel, "parse", f"unknown top-level key {key!r}")
+        includes = doc.get("scrape_config_files")
+        if includes is not None:
+            self.check_includes(rel, includes)
         scrape_configs = doc.get("scrape_configs")
+        if scrape_configs is None and includes is not None:
+            return  # a main config that only includes scrape files
         if not isinstance(scrape_configs, list) or not scrape_configs:
             self.add(rel, "parse", "scrape_configs must be a non-empty list")
             return
@@ -575,6 +582,16 @@ class PackChecker:
                 self.add(rel, "modules", f"job {name!r} is also defined in {jobs_seen[name]}")
             jobs_seen[name] = rel
             self.check_job(rel, name, job, modules_wanted)
+
+    def check_includes(self, rel: str, includes: object) -> None:
+        """scrape_config_files of a main config: the installed paths of this pack's scrape files."""
+        if not isinstance(includes, list) or not includes or not all(isinstance(i, str) for i in includes):
+            self.add(rel, "parse", "scrape_config_files must be a non-empty list of paths")
+            return
+        scrape_files = sorted(p.name for p in (self.root / "prometheus" / "scrape").glob("*.y*ml"))
+        for entry in includes:
+            if not fnmatch.filter(scrape_files, entry.rpartition("/")[2]):
+                self.add(rel, "parse", f"scrape_config_files: {entry!r} names no file of prometheus/scrape/")
 
     def check_job(self, rel: str, name: str, job: dict, modules_wanted: list[tuple[str, str, str, str]]) -> None:
         where = f"job {name}"

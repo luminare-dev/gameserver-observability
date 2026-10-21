@@ -192,13 +192,14 @@ python3 scripts/check_pack.py           # configs parse, privacy rules, and prom
 bash scripts/check_promtool.sh          # rule checks and rule tests (needs promtool)
 python3 scripts/smoke_exporters.py      # end to end (needs prometheus, json_exporter, blackbox_exporter)
 python3 scripts/lint_dashboards.py      # dashboards and their shareable copies, and promtool when on the PATH
+python3 scripts/smoke_demo.py           # starts, checks and removes the demo stack (needs Docker with Compose)
 ```
 
 `scripts/test.sh` ends with a summary like this one, from a machine without gitleaks,
 markdownlint-cli2 and promtool (the tests that need them are skipped):
 
 ```text
-Ran 254 tests in 9.082s
+Ran 269 tests in 8.927s
 
 OK (skipped=13)
 ```
@@ -206,7 +207,7 @@ OK (skipped=13)
 `python3 scripts/check_pack.py` with promtool on the `PATH` prints:
 
 ```text
-check_pack: 0 finding(s) in 5 parsed file(s); promtool: 3 file(s) passed promtool check config
+check_pack: 0 finding(s) in 6 parsed file(s); promtool: 4 file(s) passed promtool check config
 ```
 
 `python3 scripts/lint_dashboards.py` with promtool on the `PATH` prints:
@@ -220,6 +221,13 @@ prints one line per check and ends with:
 
 ```text
 smoke_exporters: all checks passed (187 s)
+```
+
+`python3 scripts/smoke_demo.py` ([demo stack](demo.md#smoke-test)) prints one line per check and
+ends with:
+
+```text
+smoke_demo: all checks passed, stack removed (44 s)
 ```
 
 ## Uninstall

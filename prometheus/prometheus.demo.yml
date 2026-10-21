@@ -1,0 +1,9 @@
+# Main Prometheus configuration of the demo stack (demo/docker-compose.yml mounts it as
+# /etc/prometheus/prometheus.yml). It is the one of docs/install.md: the pack's scrape jobs and
+# rules, which the stack mounts unchanged at the paths of the installation guide. The optional
+# jobs (prometheus/scrape/tunnel.yml and versions.yml) are left out, because the demo has no admin
+# hostname and does not fetch the platform's version list from the internet.
+scrape_config_files:
+  - /etc/prometheus/scrape/fxserver.yml
+rule_files:
+  - /etc/prometheus/rules/*.yml
