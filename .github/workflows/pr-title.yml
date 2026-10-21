@@ -1,0 +1,23 @@
+# Caller: the pull request title becomes the squash commit and the changelog line, so it is
+# checked on every title edit too. Kept apart from ci.yml so that editing a title never re-runs
+# (or skips) the lint-test check. Required check: "pr / pr-title".
+name: pr-title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions: {}
+
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr:
+    uses: ./.github/workflows/reusable-ci.yml
+    with:
+      run-lint-test: false
+      check-pr-title: true
+    permissions:
+      contents: read

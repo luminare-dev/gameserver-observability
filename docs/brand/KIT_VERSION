@@ -1,0 +1,9 @@
+untagged+a1f9ec15bef3
+# Version of the Luminare brand kit that these files were generated from.
+kit_version: untagged+a1f9ec15bef3  (the kit has no tagged version yet)
+kit_fingerprint_sha256: a1f9ec15bef32ff12e43436a25f0c6e662ee14c16ff1fe2681eda70a3eafd1a3
+kit_build_py_sha256: 9ffd1e8cc06b8c765c67a6d8fb8b506ff8ea558fa733aeb2c4608043628e64c6
+kit_palette_json_sha256: cf1017618247f34851b037b797e1fc4e083943cab9429c1d0a952a649c9d1fce  (palette/tokens.json)
+kit_font_sha256: 84ff7096ae3ec6c8be47d906d1a0ba4de7f2ce78c615275c77301964a316e16c  (Sora variable font, SIL OFL 1.1)
+generator: brand-repos build_repos.py 0.1.0
+variant: studio

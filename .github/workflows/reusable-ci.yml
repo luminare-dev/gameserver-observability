@@ -1,0 +1,124 @@
+# Reusable CI: wording and name checks, byline consistency, workflow policy, YAML and Markdown
+# lint, actionlint, zizmor and the repository's tests. Called by ci.yml and pr-title.yml.
+# Third-party actions are pinned by full commit SHA; downloaded tools are pinned by sha256.
+name: reusable-ci
+
+on:
+  workflow_call:
+    inputs:
+      run-lint-test:
+        description: Run the lint-test job.
+        type: boolean
+        default: true
+      check-pr-title:
+        description: Check the pull request title (Conventional Commits and wording).
+        type: boolean
+        default: false
+      template-mode:
+        description: >-
+          "auto" (template mode only in a repository marked as a template), "true" or "false".
+          Template mode allows the placeholders listed in PLACEHOLDERS.md.
+        type: string
+        default: auto
+      test-command:
+        description: The repository's test command (the same one CONTRIBUTING asks for).
+        type: string
+        default: python3 -m unittest discover -s tests -v
+      actionlint-version:
+        type: string
+        default: 1.7.12
+      actionlint-sha256:
+        description: sha256 of actionlint_<version>_linux_amd64.tar.gz from the release's checksums file.
+        type: string
+        default: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+
+permissions: {}
+
+jobs:
+  lint-test:
+    name: lint-test
+    if: ${{ inputs.run-lint-test }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Python tools (hash-pinned)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet --require-hashes --only-binary=:all: -r requirements-dev.txt
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+
+      - name: Install actionlint (sha256-pinned)
+        env:
+          VERSION: ${{ inputs.actionlint-version }}
+          SHA256: ${{ inputs.actionlint-sha256 }}
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/actionlint.tar.gz"
+          curl -fsSL -o "$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_linux_amd64.tar.gz"
+          echo "${SHA256}  ${archive}" | sha256sum -c -
+          tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Forbidden words, funding file, names, placeholders  # rule-text
+        env:
+          MODE: ${{ inputs.template-mode }}
+          IS_TEMPLATE: ${{ github.event.repository.is_template }}
+        run: |
+          set -euo pipefail
+          args=(--format github)
+          if [ "$MODE" = "true" ] || { [ "$MODE" = "auto" ] && [ "$IS_TEMPLATE" = "true" ]; }; then
+            args+=(--template-mode)
+          fi
+          python3 scripts/forbidden_words.py "${args[@]}"
+
+      - name: Byline, brand files and NOTICE agree
+        run: python3 scripts/set_byline.py verify
+
+      - name: Workflow policy (SHA pins, permissions, triggers)
+        run: python3 scripts/check_workflows.py --list
+
+      - name: yamllint
+        run: yamllint --strict .
+
+      - name: markdownlint
+        uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
+        with:
+          globs: "**/*.md"
+
+      - name: actionlint
+        run: actionlint -color
+
+      - name: zizmor (offline audits)
+        run: zizmor --offline --min-severity=low .github/workflows
+
+      - name: Tests
+        env:
+          TEST_COMMAND: ${{ inputs.test-command }}
+        run: bash -euo pipefail -c "$TEST_COMMAND"
+
+  pr-title:
+    name: pr-title
+    if: ${{ inputs.check-pr-title && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Conventional Commit title with offer-free wording
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: python3 scripts/check_pr_title.py

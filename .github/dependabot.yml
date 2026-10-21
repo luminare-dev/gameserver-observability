@@ -1,0 +1,36 @@
+# Dependabot version updates (https://docs.github.com/en/code-security/dependabot).
+# Keeps the SHA pins of the workflow actions and their "# vX.Y.Z" comments current, and the
+# hash-pinned Python tools in requirements-dev.txt. A 7-day cooldown lets a bad release surface
+# before it lands here. The pinned gitleaks and actionlint downloads (version + sha256 inputs in
+# the reusable workflows) are not seen by Dependabot; bump them by hand (PUBLISHING.md, monthly).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+      include: scope
+    labels: [dependencies]
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: build
+      include: scope
+    labels: [dependencies]
+    groups:
+      dev-tools:
+        patterns: ["*"]

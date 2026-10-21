@@ -1,0 +1,19 @@
+# Allowlist for scripts/forbidden_words.py (plan: one reviewed exception per line).
+#
+#   <path glob> | <rule id, matched text or *> | <reason>
+#
+# * The glob is matched against the path from the repository root; "*" also crosses folders.
+# * The term is a rule id (python3 scripts/forbidden_words.py --list-rules), the exact matched
+#   text (for example one store domain), "placeholder", "template-hint", "email" or "*" (any rule
+#   except "email"). Terms from the private list (--extra-terms) can never be excused.
+# * "@name" as the path covers the name check (repository, package and README title names).
+# * Every entry needs a reason a reviewer can check. Scope entries to data or UI files, or to the
+#   one domain the project really links to. A funding file can never be allowlisted.
+# * Unused entries are reported as warnings; delete them.
+
+scripts/forbidden_words.py | * | the check's own rule list, its documentation and the usage examples
+tests/test_forbidden_words.py | * | test sentences that must trigger the rules
+tests/test_check_pr_title.py | * | test titles that must be rejected for their wording
+scripts/set_byline.py | placeholder | prints the names of the placeholders to fill again after a brand swap
+LICENSE | sell | the licence grants the right to "sell copies" of the software
+licenses/*.txt | sell | unchanged licence texts that grant the right to sell copies

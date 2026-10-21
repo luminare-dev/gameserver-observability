@@ -1,0 +1,15 @@
+# yamllint configuration (https://yamllint.readthedocs.io/)
+extends: default
+
+ignore: |
+  node_modules/
+  .venv/
+
+rules:
+  document-start: disable          # GitHub workflow and form files do not use "---"
+  line-length:
+    max: 120
+  comments:
+    min-spaces-from-content: 1
+  truthy:
+    check-keys: false              # "on:" in workflows

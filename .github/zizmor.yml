@@ -1,0 +1,11 @@
+# zizmor configuration (https://docs.zizmor.sh/configuration/).
+rules:
+  self-repository:
+    # zizmor suggests GitHub's newer "$/" syntax for reusable workflows in the same repository.
+    # actionlint 1.7.12 rejects "$/" (tested 2026-10-06), and "./" is the documented, equally
+    # pinned form (the called file comes from the same commit). Revisit when actionlint supports it.
+    ignore:
+      - ci.yml
+      - pr-title.yml
+      - release.yml
+      - scorecard.yml

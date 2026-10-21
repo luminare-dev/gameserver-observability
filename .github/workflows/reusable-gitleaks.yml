@@ -1,0 +1,56 @@
+# Reusable secret scan over the full git history with the gitleaks binary.
+#
+# Why the binary and not gitleaks/gitleaks-action: the action needs a GITLEAKS_LICENSE secret for
+# repositories owned by an organization (README of gitleaks-action v3.0.0, checked 2026-10-06),
+# fork pull requests never receive secrets, the action sends the repository name and owner to a
+# licence-key service, and the action itself left the MIT licence with v2. The gitleaks binary is
+# MIT, needs no secret and runs the same way locally. It is downloaded from the gitleaks release
+# and checked against a sha256 pinned here (from gitleaks_<version>_checksums.txt), so a replaced
+# release asset fails the job.
+name: reusable-gitleaks
+
+on:
+  workflow_call:
+    inputs:
+      gitleaks-version:
+        type: string
+        default: 8.30.1
+      gitleaks-sha256:
+        description: sha256 of gitleaks_<version>_linux_x64.tar.gz from the release's checksums file.
+        type: string
+        default: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+
+permissions: {}
+
+jobs:
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install gitleaks (sha256-pinned)
+        env:
+          VERSION: ${{ inputs.gitleaks-version }}
+          SHA256: ${{ inputs.gitleaks-sha256 }}
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/gitleaks.tar.gz"
+          curl -fsSL -o "$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz"
+          echo "${SHA256}  ${archive}" | sha256sum -c -
+          tar -xzf "$archive" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" version
+
+      - name: Scan every commit
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/gitleaks" git --redact --no-banner --verbose --exit-code 1 \
+            --config .gitleaks.toml .

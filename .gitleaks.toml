@@ -1,0 +1,57 @@
+# gitleaks configuration: the built-in rules plus rules for game-server and chat secrets that
+# the defaults do not cover (checked against gitleaks 8.30.1's default config, 2026-10-06).
+# Run locally:  gitleaks git --redact --config .gitleaks.toml .
+title = "oss-template gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "cfx-server-key"
+description = "FXServer license key (cfxk_...); the platform also scans public repositories for these"
+regex = '''\b(cfxk_[A-Za-z0-9]{10,40}_[A-Za-z0-9]{4,12})\b'''
+secretGroup = 1
+keywords = ["cfxk_"]
+
+  [[rules.allowlists]]
+  description = "documentation placeholder made of x characters"
+  regexes = ['''^cfxk_x+_x+$''']
+
+[[rules]]
+id = "fxserver-license-key-setting"
+description = "sv_licenseKey set to a literal value in a server config"
+regex = '''(?i)\bsv_licenseKey\s+["']?([A-Za-z0-9_]{16,64})["']?'''
+secretGroup = 1
+keywords = ["sv_licensekey"]
+
+  [[rules.allowlists]]
+  description = "templated values (Ansible/Jinja, environment variables, convar references)"
+  regexTarget = "line"
+  regexes = ['''\{\{.*\}\}''', '''\$\{?[A-Za-z_]''', '''changeme''']
+
+  [[rules.allowlists]]
+  description = "documentation placeholders (YOUR_..., example, placeholder, the x-placeholder key)"
+  regexes = ['''(?i)^your[_-]''', '''(?i)example|placeholder''', '''^cfxk_x+_x+$''']
+
+[[rules]]
+id = "txadmin-api-token"
+description = "TXHOST_API_TOKEN set to a literal value"
+regex = '''\bTXHOST_API_TOKEN\s*[=:]\s*["']?([A-Za-z0-9_-]{16,48})["']?'''
+secretGroup = 1
+keywords = ["txhost_api_token"]
+
+  [[rules.allowlists]]
+  description = "templated values and the documented 'disabled' value"
+  regexTarget = "line"
+  regexes = ['''\{\{.*\}\}''', '''\$\{?[A-Za-z_]''', '''(?i)=\s*["']?disabled''']
+
+  [[rules.allowlists]]
+  description = "documentation placeholders (your-..., example, placeholder)"
+  regexes = ['''(?i)^your[_-]''', '''(?i)example|placeholder''']
+
+[[rules]]
+id = "discord-webhook-url"
+description = "Discord webhook URL (anyone with the URL can post to the channel)"
+regex = '''https://(?:(?:canary|ptb)\.)?discord(?:app)?\.com/api/webhooks/[0-9]{17,20}/([A-Za-z0-9_-]{60,80})'''
+secretGroup = 1
+keywords = ["discord.com/api/webhooks", "discordapp.com/api/webhooks"]

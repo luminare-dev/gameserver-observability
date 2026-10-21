@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+# Release build output (scripts/package_release.py)
+dist/
+# Local tool installs
+node_modules/
+# Never commit environment files or server configs with keys
+.env
+.env.*
+!.env.example
+server.cfg

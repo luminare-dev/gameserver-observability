@@ -1,0 +1,23 @@
+oss-template
+Copyright 2026 Paul Pasaurek
+
+The source code and documentation in this repository are licensed under MIT
+(see the LICENSE file), with the exceptions below. That licence covers the
+code and documentation only.
+
+The names "Luminare Development" and "Luminare", the Luminare logo and mark,
+the name and logo of this project, the README header images, the social
+preview image and all files in docs/brand/ are not licensed under MIT
+or under any other licence in this repository. No permission is granted to
+use them, except as required for reasonable and customary use in describing
+the origin of the work and reproducing the content of this NOTICE file.
+
+The images in docs/brand/ contain text set in the Sora typeface, converted to
+outlines. Sora is Copyright 2019 The Sora Project Authors and is licensed
+under the SIL Open Font License, Version 1.1 (https://openfontlicense.org).
+The font keeps its own licence.
+
+The licence texts in licenses/ are reproduced unchanged for reference: the
+Apache License 2.0 (Copyright The Apache Software Foundation), the MIT License
+and MIT No Attribution (texts from the SPDX License List). They are not
+licensed under MIT; they apply to a repository only when it chooses them.

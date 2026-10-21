@@ -1,0 +1,26 @@
+# Caller: OpenSSF Scorecard once a week, on pushes to main and when branch protection changes.
+# GitHub disables scheduled workflows in public repositories after 60 days without activity;
+# check the Actions tab once a month (PUBLISHING.md, maintenance).
+name: scorecard
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"   # Mondays 04:17 UTC
+  push:
+    branches: [main]
+  branch_protection_rule:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  scorecard:
+    # Private repositories (part A of PUBLISHING.md, until the gate passes) are skipped: the action
+    # and the code-scanning upload need GitHub Advanced Security there.
+    if: ${{ !github.event.repository.private }}
+    uses: ./.github/workflows/reusable-scorecard.yml
+    permissions:
+      contents: read           # read the repository
+      actions: read            # read workflow runs for the checks
+      security-events: write   # upload the SARIF file to code scanning
+      id-token: write          # sign the published results

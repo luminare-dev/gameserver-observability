@@ -1,0 +1,26 @@
+# Caller: release-please on every push to main. Skipped in the template repository itself
+# (a repository marked as a template), so only repositories created from it make releases.
+# Needs the repository setting "Allow GitHub Actions to create and approve pull requests".
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: ${{ !github.event.repository.is_template }}
+    uses: ./.github/workflows/reusable-release.yml
+    permissions:
+      contents: write        # release commit, tag, draft release, attached files
+      pull-requests: write   # the release pull request
+      issues: write          # release-please labels
+      id-token: write        # Sigstore certificate for the attestation
+      attestations: write    # store the attestation
