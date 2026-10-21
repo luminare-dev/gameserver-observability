@@ -114,9 +114,10 @@ players, a minute apart at first, and from the 19 on its `svMain` ticks took 90 
 ![Dashboard "Game server overview" over 15 minutes of the run, synthetic data from the bundled simulated server](media/dashboard-spike.gif)
 
 *Synthetic data from the bundled simulated server: the run in 45 frames, each showing the 15
-minutes up to its moment, 20 seconds apart (`docs/media/dashboard-spike.gif`).*
+minutes up to its moment, 20 seconds apart (`docs/media/dashboard-spike.gif`, also at the top of
+the README).*
 
-`docs/media/dashboard.png` (at the top of this page and in the README) was taken during the run,
+`docs/media/dashboard.png` (at the top of this page) was taken during the run,
 while `FXServerTickTimeHigh` fired. The frames of `docs/media/dashboard-spike.gif` were drawn
 after the run from the data Prometheus had recorded, each for a 15-minute window ending at its
 moment, so that no panel shows values past that moment. Grafana ran in kiosk mode in headless

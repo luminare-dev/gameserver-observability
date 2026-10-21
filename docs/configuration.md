@@ -24,8 +24,13 @@ set sv_prometheusBasicAuthUser "prometheus"
 set sv_prometheusBasicAuthPassword "CHANGE_ME_PERF_PASSWORD"
 ```
 
+With the `luminare.gameserver` collection, set `fxserver_perf_user` and `fxserver_perf_password`
+(or the `txadmin` role's `txadmin_prometheus_basic_auth`) instead, and its `fxserver` role writes
+the two lines ([installation](install.md#with-the-luminaregameserver-collection)).
+
 The server compares the whole `Authorization` header with these values. With neither set,
-`/perf/` is open, and the probe `http_401_expected` reports it (`probe_success` 0). The JSON
+`/perf/` is open by the server's source code (not yet tried on a running server), and the probe
+`http_401_expected` reports it (`probe_success` 0). The JSON
 endpoints need no setting; a proxy between Prometheus and the server is refused from
 `sv_requestParanoia 1` on ([metrics reference](metrics.md#request-paranoia-and-rate-limits)).
 
@@ -232,6 +237,45 @@ this repository change the expected alerts in `tests/rules/` and the alert's run
 it; `bash scripts/check_promtool.sh` must pass. The rule groups are evaluated every 30 seconds
 (`fxserver-tick-time`, `fxserver-alerts`) or every minute (the others), whatever
 `evaluation_interval` the Prometheus config sets.
+
+## Send the alerts to Alertmanager
+
+The pack ships no Alertmanager configuration: Prometheus evaluates the rules and shows pending and
+firing alerts (Status → Alerts, the `ALERTS` series, the dashboard), and sending them to people is
+the job of your Alertmanager ([ADR 0023](adr/0023-no-alertmanager-in-0-1.md)). Point Prometheus at
+it in `/etc/prometheus/prometheus.yml`:
+
+```yaml
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["127.0.0.1:9093"]
+```
+
+Then route on the alerts' labels in your Alertmanager configuration. Every alert has the labels
+`alertname`, `server` (the game server) and `severity` (`critical` or `warning`), and the
+annotations `summary`, `description` and `runbook_url`, which most receivers can put into the
+message. This route sends critical alerts to one receiver and everything else to another, grouped
+by alert and game server:
+
+```yaml
+route:
+  receiver: default
+  group_by: [alertname, server]
+  routes:
+    - matchers: ['severity="critical"']
+      receiver: on-call
+receivers:
+  - name: default
+  - name: on-call
+```
+
+The two receivers are empty here, so they deliver nothing; add your mail, chat or webhook
+settings to them in your own configuration, and keep their passwords, tokens and webhook URLs out
+of git. On 2026-10-22, `amtool check-config` (amtool 0.34.1) accepted this file,
+`amtool config routes test --config.file=alertmanager.yml severity=critical` printed `on-call`,
+and the `alerting` block above passed `promtool check config` together with the pack's rule
+files.
 
 ## Fake game server (`demo/fake-fxserver/fake_fxserver.py`)
 

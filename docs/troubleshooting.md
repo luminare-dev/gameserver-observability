@@ -57,7 +57,10 @@ spaces inside the password, so a server password that starts or ends with a spac
 **Fix:** compare the values (choose a password without leading or trailing spaces), then check
 that Prometheus can read the file (its user needs read access to
 `/etc/prometheus/secrets/fxserver_perf`) and that the server was restarted after the variables
-changed.
+changed. With the `luminare.gameserver` collection, the server's values are
+`fxserver_perf_user` and `fxserver_perf_password`, or the `user` and `password` of the `txadmin`
+role's `txadmin_prometheus_basic_auth` when that toggle is enabled
+([installation](install.md#with-the-luminaregameserver-collection)).
 
 ## `sample limit exceeded` on a target
 
@@ -190,6 +193,39 @@ Panels of exporters you do not run stay empty; that is expected.
 
 **Fix:** run `python3 scripts/lint_dashboards.py --fix`, then the check again, and commit both
 files. A finding `[parse] … not in the repository's format` has the same fix.
+
+## `FXServerArtifactOld` never fires and Build age shows "No data"
+
+**Cause:** the two build alerts and the Build age panel read `fxserver_artifact_build` and
+`fxserver_artifact_installed_timestamp_seconds`, which node_exporter's textfile collector reads
+from `fxserver_artifact.prom` on the game server. The file is missing (the `fxserver` role of the
+`luminare.gameserver` collection writes it only with `fxserver_textfile_dir` set), node_exporter
+reads another folder, or its job has no `server` label. Without the series the alerts stay silent
+instead of failing.
+
+**Fix:** on the game server, check that the file exists in the folder passed to node_exporter's
+`--collector.textfile.directory`; then query `fxserver_artifact_build` in Prometheus, which must
+return one series per game server with its `server` label
+([configuration](configuration.md#host-and-database-jobs)).
+
+## Alerts fire in Prometheus, but nobody gets a notification
+
+**Cause:** the pack evaluates alerts but sends none: Prometheus needs an `alerting` block that
+names your Alertmanager, and the Alertmanager a route for the alerts' labels
+([ADR 0023](adr/0023-no-alertmanager-in-0-1.md)).
+
+**Fix:** add both as shown in [configuration](configuration.md#send-the-alerts-to-alertmanager).
+`curl -fsS http://127.0.0.1:9090/api/v1/alertmanagers` lists the Alertmanagers Prometheus sends
+to, and `amtool config routes test --config.file=alertmanager.yml severity=critical server=game-01`
+prints the receiver an alert would reach.
+
+## Quickstart: `curl: (7) Failed to connect to 127.0.0.1 port 30120`
+
+**Cause:** the demo stack is not running, for example because `docker compose up` stopped at a
+port that was already taken, or it was started with another game port (`GSO_DEMO_GAME_PORT`).
+
+**Fix:** `docker compose -f demo/docker-compose.yml ps` shows what runs; start it again on free
+ports ([demo stack](demo.md#start-and-stop)) and send the request to the game port you chose.
 
 ## Still stuck?
 

@@ -1,11 +1,19 @@
 # Installation
 
-Install the scrape jobs, the exporter modules and the rules on the host that runs Prometheus, and
-the dashboard on the host that runs Grafana ([Dashboards](#dashboards)). The game server needs no
-software from this pack, only the two `/perf/` credentials
-([configuration](configuration.md#game-server)). There is no release yet, so the commands use the
-`main` branch; once releases exist, check out a release tag instead and verify the download as
-shown below.
+The pack is a set of files for a Prometheus and a Grafana you already run: install the scrape
+jobs, the exporter modules and the rules on the host that runs Prometheus ([Install](#install)),
+and the dashboard on the host that runs Grafana ([Dashboards](#dashboards)). The pack adds to
+your setup and changes none of your own jobs, rules or dashboards: Prometheus gets one more scrape
+file and five rule files, json_exporter and blackbox_exporter get this pack's modules (in a new
+config, or merged into the one they have), and Grafana gets one dashboard in its own folder. The
+game server needs no software from this pack, only the two `/perf/` credentials
+([configuration](configuration.md#game-server)); if it is set up with the `luminare.gameserver`
+collection, its roles set them
+([With the luminare.gameserver collection](#with-the-luminaregameserver-collection)). To look at
+the pack first without a game server, start the [demo stack](demo.md).
+
+There is no release yet, so the commands use the `main` branch; once releases exist, check out a
+release tag instead and verify the download as shown below.
 
 The commands in [Install](#install), and those for Prometheus and the exporters in
 [Uninstall](#uninstall), were run on 2026-10-21 as root in
@@ -145,6 +153,34 @@ dashboard and the data source "Game server metrics", the dashboard opened with t
 and the Game server selector on All (`game-01`), and every panel showed data from the fake server
 and the exporters. The import of the shareable copy was run through Grafana's import API.
 
+## With the luminare.gameserver collection
+
+The [`luminare.gameserver`](https://github.com/luminare-dev/ansible-collection-gameserver) Ansible
+collection installs and updates the game server. Its roles already do the game server's side of
+this pack; set these variables for your game servers:
+
+| This pack needs | Variable of the collection |
+|---|---|
+| The `/perf/` credentials (`sv_prometheusBasicAuthUser`, `sv_prometheusBasicAuthPassword` in `secrets.cfg`) | `fxserver_perf_user` and `fxserver_perf_password` of the `fxserver` role, or, when the `txadmin` role runs too, its toggle `txadmin_prometheus_basic_auth` (`enabled`, `user`, `password`) instead; use one of the two. The password needs at least 24 characters. |
+| The build metrics of `FXServerArtifactOld` and `FXServerBuildBehindRecommended` (`fxserver_artifact.prom`) | `fxserver_textfile_dir` of the `fxserver` role: the folder that node_exporter's textfile collector reads |
+
+For example, in the group variables of the game servers, with the password taken from your secret
+store (an encrypted variables file, never plain text in git):
+
+```yaml
+fxserver_perf_user: prometheus
+fxserver_perf_password: "{{ vault_fxserver_perf_password }}"
+fxserver_textfile_dir: /var/lib/node_exporter/textfile_collector
+```
+
+Then install this pack on the Prometheus host as in [Install](#install), with the same user name
+in `basic_auth.username` and the same password in `/etc/prometheus/secrets/fxserver_perf`, and run
+node_exporter on the game server with
+`--collector.textfile.directory=/var/lib/node_exporter/textfile_collector` and a job of your own
+([configuration](configuration.md#host-and-database-jobs)). The collection has no role that
+installs this pack, Prometheus, the exporters or Grafana; those stay with your monitoring setup.
+The variables above are documented in the collection's `fxserver` and `txadmin` role READMEs.
+
 ## Verify the release download
 
 Every release has a `SHA256SUMS` file and a build provenance attestation (the attestation only
@@ -199,7 +235,7 @@ python3 scripts/smoke_demo.py           # starts, checks and removes the demo st
 markdownlint-cli2 and promtool (the tests that need them are skipped):
 
 ```text
-Ran 269 tests in 8.927s
+Ran 276 tests in 9.276s
 
 OK (skipped=13)
 ```
@@ -227,7 +263,7 @@ smoke_exporters: all checks passed (187 s)
 ends with:
 
 ```text
-smoke_demo: all checks passed, stack removed (44 s)
+smoke_demo: all checks passed, stack removed (57 s)
 ```
 
 ## Uninstall

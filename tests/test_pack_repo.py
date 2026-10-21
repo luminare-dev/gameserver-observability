@@ -18,6 +18,10 @@
 - promtool: every rule file is named in the rule_files of at least one rule test.
 - gitleaks: the license-key rules (the same as in the luminare.gameserver collection) find keys
   of any layout, also right after a word character; documentation placeholders stay clean.
+- README: the sections in the fixed order of the project page (template, README section order),
+  the title and purpose line, at most five Quickstart commands, every ADR listed under its own
+  title, and the not-affiliated line. README and docs: every relative link and every anchor in
+  it resolves.
 
 The YAML tests need PyYAML (requirements-test.txt). scripts/test.sh installs it and sets
 PACK_TESTS_STRICT=1, so CI and the release build fail instead of skipping them; a bare
@@ -444,6 +448,111 @@ class RuleCoverageTest(unittest.TestCase):
         (root / "tests" / "rules" / "rest.test.yaml").write_text(
             "rule_files:\n  - ../../rules/*.yml\n  - ../../rules/c.yaml\ntests: []\n", encoding="utf-8")
         self.assertEqual(rule_files_without_test(root), [])
+
+
+# The README's level-2 sections in the fixed order of the project page on luminare.tech, its
+# purpose line (the repository's description) and the line every FXServer repository carries.
+README_SECTIONS = ["Why", "Quickstart", "How it works", "Design decisions", "Supported versions", "Limitations",
+                   "Results", "Documentation and links", "Not affiliated", "Licence"]
+README_PURPOSE = ("Metrics, dashboards and alerts collected from outside the server process, "
+                  "for FiveM/RedM servers (FXServer).")
+NOT_AFFILIATED = "Not affiliated with or endorsed by Cfx.re, Rockstar Games or Take-Two."
+LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)\s]+)\)")
+FENCED_CODE_RE = re.compile(r"^[ \t]*```.*?^[ \t]*```[ \t]*$", re.M | re.S)
+ADR_DIR = ROOT / "docs" / "adr"
+
+
+def without_code(text: str) -> str:
+    """Markdown without fenced code blocks and inline code: brackets there are not links."""
+    return re.sub(r"`[^`\n]*`", "", FENCED_CODE_RE.sub("", text))
+
+
+def heading_anchor(heading: str) -> str:
+    """The fragment GitHub gives a Markdown heading: lower case, punctuation dropped, spaces to -."""
+    text = re.sub(r"[`*]", "", heading.strip()).lower()
+    return re.sub(r"[^\w\- ]", "", text).replace(" ", "-")
+
+
+def heading_anchors(path: Path) -> set[str]:
+    text = FENCED_CODE_RE.sub("", path.read_text(encoding="utf-8"))
+    return {heading_anchor(m.group(1)) for m in re.finditer(r"^#{1,6} (.+)$", text, re.M)}
+
+
+def broken_links(path: Path) -> list[str]:
+    """Relative links of a Markdown file whose file, or whose heading in a Markdown file, does not exist."""
+    broken = []
+    for target in LINK_RE.findall(without_code(path.read_text(encoding="utf-8"))):
+        if re.match(r"[a-z][a-z0-9+.-]*:", target):  # https:, mailto: and other absolute links
+            continue
+        file_part, _, fragment = target.partition("#")
+        dest = (path.parent / file_part).resolve() if file_part else path
+        if not dest.exists() or (fragment and dest.suffix == ".md" and fragment not in heading_anchors(dest)):
+            broken.append(target)
+    return broken
+
+
+class ReadmeTest(unittest.TestCase):
+    def setUp(self):
+        self.text = (ROOT / "README.md").read_text(encoding="utf-8")
+        parts = re.split(r"(?m)^## (.+)$", self.text)
+        self.sections = {parts[i].strip(): parts[i + 1] for i in range(1, len(parts), 2)}
+
+    def test_the_sections_are_in_the_fixed_order(self):
+        self.assertEqual(re.findall(r"(?m)^## (.+)$", self.text), README_SECTIONS)
+
+    def test_the_title_and_the_purpose_line_follow_the_header(self):
+        body = self.text.split("<!-- header:end -->\n", 1)[1]
+        self.assertTrue(body.startswith(f"\n# gameserver-observability\n\n{README_PURPOSE}\n\n"), body[:200])
+
+    def test_the_quickstart_has_at_most_five_commands(self):
+        blocks = re.findall(r"```bash\n(.*?)```", self.sections["Quickstart"], re.S)
+        self.assertEqual(len(blocks), 1)
+        commands = [line for line in blocks[0].splitlines() if line.strip() and not line.lstrip().startswith("#")]
+        self.assertLessEqual(len(commands), 5)
+        self.assertIn("docker compose -f demo/docker-compose.yml up -d", commands)
+
+    def test_every_adr_is_listed_under_its_own_title(self):
+        listed = re.findall(r"^- \[ADR (\d{4}): ([^\]]+)\]\(docs/adr/([^)]+)\)", self.sections["Design decisions"],
+                            re.M)
+        files = sorted(p.name for p in ADR_DIR.glob("[0-9][0-9][0-9][0-9]-*.md") if not p.name.startswith("0000-"))
+        self.assertEqual([name for _, _, name in listed], files)
+        for number, title, name in listed:
+            with self.subTest(adr=name):
+                lines = (ADR_DIR / name).read_text(encoding="utf-8").splitlines()
+                self.assertEqual(lines[0], f"# {number}. {title}")
+                self.assertRegex(lines[2], r"^- \*\*Status:\*\* (accepted|proposed|superseded by \[\d{4}\]\(.+\))$")
+                self.assertRegex(lines[3], r"^- \*\*Date:\*\* \d{4}-\d{2}-\d{2}$")
+
+    def test_the_not_affiliated_line(self):
+        self.assertIn(NOT_AFFILIATED, " ".join(self.sections["Not affiliated"].split()))
+
+
+class DocLinksTest(unittest.TestCase):
+    def test_every_relative_link_and_anchor_resolves(self):
+        # The ADR template's links are placeholders for its copies.
+        files = [ROOT / "README.md", *sorted(p for p in (ROOT / "docs").rglob("*.md") if p.name != "0000-template.md")]
+        self.assertGreater(len(files), 10)
+        for path in files:
+            with self.subTest(file=path.relative_to(ROOT).as_posix()):
+                self.assertEqual(broken_links(path), [])
+
+    def test_the_helpers_find_broken_links_and_ignore_code(self):
+        self.assertEqual(heading_anchor("Job `fxserver_json`: `info.json` and `dynamic.json` through json_exporter"),
+                         "job-fxserver_json-infojson-and-dynamicjson-through-json_exporter")
+        self.assertEqual(heading_anchor("With the luminare.gameserver collection"),
+                         "with-the-luminaregameserver-collection")
+        self.assertEqual(heading_anchor("Why not a similar project?"), "why-not-a-similar-project")
+        folder = temp_dir("gso-links-")
+        (folder / "other.md").write_text("# Other\n\n## A heading (`x`)\n\n```text\n# not a heading\n```\n",
+                                         encoding="utf-8")
+        (folder / "page.md").write_text(
+            "# Page\n\n## Here\n\n[ok](other.md#a-heading-x) [ok](#here) [ok](https://example.com/x)\n"
+            "[file](missing.md) [anchor](other.md#nowhere) [own](#gone) ![img](media/none.png)\n"
+            "[code block heading](other.md#not-a-heading)\n"
+            "`[code](missing-in-code.md)`\n\n   ```text\n   [block](missing-in-block.md)\n   ```\n",
+            encoding="utf-8")
+        self.assertEqual(broken_links(folder / "page.md"),
+                         ["missing.md", "other.md#nowhere", "#gone", "media/none.png", "other.md#not-a-heading"])
 
 
 @unittest.skipUnless(shutil.which("gitleaks"), "gitleaks is not on the PATH")

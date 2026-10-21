@@ -25,7 +25,13 @@ The **Verified** column says what was checked for the source field on the game s
 - **unverified**: an assumption; the row says which one.
 
 No row has been checked against a running FXServer yet. That needs a server with a license key;
-until then this is listed under Limitations in the README.
+until then this is listed under Limitations in the README, and the [probe log](probe-log.md)
+holds the commands for that check and its empty result tables. The source files behind the rows
+were compared with those of build 37692 (commit
+[`ccd9221`](https://github.com/citizenfx/fivem/tree/ccd92212b96d4633897450940a57dc61dc2bc5b2/code/components/citizen-server-impl/src)),
+the Latest build on 2026-10-22: the endpoint handlers, the tick-time histograms and the version
+string's build script are unchanged, and so is the code around `onesync_enabled` (README,
+Results).
 
 The exported side is checked for every row except the optional tunnel probe:
 `scripts/smoke_exporters.py` (the CI job `exporters`) runs Prometheus 3.15.0, json_exporter 0.8.0
@@ -287,6 +293,6 @@ From the source of build 35245:
   name, tags, locale, other variables, the resource list (one series per resource would break
   the [cardinality budget](cardinality.md)), the icon and the version hash.
 - **txAdmin's own status endpoint:** its fields have not been checked yet, so there is no module
-  for it.
+  for it ([probe log](probe-log.md#txadmin-hoststatus)).
 - **The exporters' own `/metrics`:** not scraped by these jobs; add a job of your own if you want
   the exporters' process metrics.

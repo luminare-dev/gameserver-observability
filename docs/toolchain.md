@@ -81,7 +81,9 @@ dashboard check in CI (`scripts/lint_dashboards.py`) needs only Python and promt
 pictures in `docs/media/` were taken from the demo stack with headless Chromium from the image
 below, driven by Playwright for Python 1.64.0 and labelled with Pillow 13.0.0, both installed
 with pip into a throwaway virtual environment, without Playwright's own browser download
-([demo](demo.md#pictures)). The downloads were checked against the checksums named below:
+([demo](demo.md#pictures)). On 2026-10-22, amtool from the Alertmanager release checked the example
+route in [configuration](configuration.md#send-the-alerts-to-alertmanager). The downloads were
+checked against the checksums named below:
 
 | Tool | Version | File or image, sha256 |
 |---|---|---|
@@ -91,6 +93,7 @@ with pip into a throwaway virtual environment, without Playwright's own browser 
 | cloudflared | 2026.10.2 | `cloudflared-linux-amd64`, `35fbdd2beb378436c7da377d7358cea8e33f9c94a6705d1d8036bf9b0d6d8005` (the checksum in the release notes) |
 | MariaDB | 11.8.9 | image `mariadb:11.8@sha256:f16d7a344413e519dff518f27bdb221388f84b0d274c97c4fb5f2cb0dc1b34fa` |
 | Chromium (headless shell) | 156.0.8078.48 | image `chromedp/headless-shell@sha256:3da74b0945e4f80f00f0310bcda9f76cee283539ebd200a053a7bebf3de89423` |
+| amtool (Alertmanager) | 0.34.1 | `alertmanager-0.34.1.linux-amd64.tar.gz`, `265b9d1e55ef0d5306a436018af6d2b686c2ce051f03d968f7464ecb1372a7e8` (the release's `sha256sums.txt`) |
 
 `scripts/lint_dashboards.py` records the Grafana version and its dashboard schema version (42)
 in `GRAFANA_VERSION` and `SCHEMA_VERSION`; a dashboard saved by a newer Grafana fails the check
