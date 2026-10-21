@@ -6,8 +6,14 @@
   `dependencies` label (the PR-title check rejects anything else), and every requirements file,
   Dockerfile and Compose file is covered by an ecosystem.
 - Python requirements are pinned by version and sha256.
-- CI and the release build run the same test command; the promtool and gitleaks pins match
-  docs/toolchain.md and the secret-scan workflow.
+- CI and the release build run the same test command; the promtool, Prometheus, exporter and
+  gitleaks pins match docs/toolchain.md and the secret-scan workflow; the promtool job runs the
+  pack check and the exporters job the end-to-end run.
+- Every metric the scrape config and the json_exporter modules produce, every job and every probe
+  module is in docs/metrics.md, and scripts/smoke_exporters.py expects exactly those metrics.
+- docs/cardinality.md: the sample limits and target counts in its tables are those of the scrape
+  configs, and its sums add up.
+- The scrape job's build rule finds the build number in both likely shapes of the version string.
 - promtool: every rule file is named in the rule_files of at least one rule test.
 - gitleaks: the license-key rules (the same as in the luminare.gameserver collection) find keys
   of any layout, also right after a word character; documentation placeholders stay clean.
@@ -43,7 +49,9 @@ except ImportError:  # scripts/test.sh installs it; see the module docstring
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import check_pack  # noqa: E402
 import package_release as pr  # noqa: E402
+import smoke_exporters  # noqa: E402
 
 # Where the pack's files live (docs/adr/0005-pack-layout-and-release-archive.md). Sample paths,
 # so an export-ignore attribute is caught even before the first file of a folder exists.
@@ -224,6 +232,27 @@ class WorkflowInputsTest(unittest.TestCase):
         self.assertIn(f"prometheus-{version}.linux-amd64.tar.gz", toolchain)
         self.assertIn(sha256, toolchain)
 
+    def test_promtool_job_checks_the_pack_configs(self):
+        runs = [step.get("run", "") for step in load_yaml(".github/workflows/ci.yml")["jobs"]["promtool"]["steps"]]
+        self.assertIn("python3 scripts/check_pack.py --require-promtool", runs)
+
+    def test_exporter_pins_match_the_toolchain_page_and_the_promtool_job(self):
+        jobs = load_yaml(".github/workflows/ci.yml")["jobs"]
+        env = jobs["exporters"]["env"]
+        self.assertEqual((env["PROMETHEUS_VERSION"], env["PROMETHEUS_SHA256"]),
+                         (jobs["promtool"]["env"]["PROMTOOL_VERSION"], jobs["promtool"]["env"]["PROMTOOL_SHA256"]))
+        toolchain = (ROOT / "docs" / "toolchain.md").read_text(encoding="utf-8")
+        for name, prefix in (("prometheus", "PROMETHEUS"), ("json_exporter", "JSON_EXPORTER"),
+                             ("blackbox_exporter", "BLACKBOX_EXPORTER")):
+            version, sha256 = str(env[f"{prefix}_VERSION"]), env[f"{prefix}_SHA256"]
+            with self.subTest(tool=name):
+                self.assertRegex(version, r"^\d+\.\d+\.\d+$")
+                self.assertRegex(sha256, r"^[0-9a-f]{64}$")
+                self.assertIn(f"{name}-{version}.linux-amd64.tar.gz", toolchain)
+                self.assertIn(sha256, toolchain)
+        runs = [step.get("run", "") for step in jobs["exporters"]["steps"]]
+        self.assertIn("python3 scripts/smoke_exporters.py", runs)
+
     def test_gitleaks_pin_matches_the_secret_scan_and_the_toolchain_page(self):
         script = (ROOT / "scripts" / "test.sh").read_text(encoding="utf-8")
         version = re.search(r"^GITLEAKS_VERSION=(\d+\.\d+\.\d+)$", script, re.M)
@@ -237,6 +266,128 @@ class WorkflowInputsTest(unittest.TestCase):
         toolchain = (ROOT / "docs" / "toolchain.md").read_text(encoding="utf-8")
         self.assertIn(f"gitleaks_{version.group(1)}_linux_x64.tar.gz", toolchain)
         self.assertIn(sha256.group(1), toolchain)
+
+
+def exported_metrics() -> set[str]:
+    """The fxserver_* metric names the pack's configs produce, read with the pack check's reader."""
+    names: set[str] = set()
+    scrape = check_pack.load_yaml((ROOT / "prometheus" / "scrape" / "fxserver.yml").read_text(encoding="utf-8"))
+    for job in scrape["scrape_configs"]:
+        for rule in job.get("metric_relabel_configs") or []:
+            if rule.get("target_label") == "__name__":
+                alternatives = re.fullmatch(r"\w+_\(([\w|]+)\)", rule["regex"]).group(1).split("|")
+                names |= {rule["replacement"].replace("$1", alt) for alt in alternatives}
+    modules = check_pack.load_yaml((ROOT / "json_exporter" / "config.yml").read_text(encoding="utf-8"))["modules"]
+    checker = check_pack.PackChecker(ROOT)
+    for module in modules.values():
+        for metric in module["metrics"]:
+            names |= set(checker.json_metric_names(metric))
+    return names
+
+
+class PackDocsTest(unittest.TestCase):
+    def setUp(self):
+        self.metrics_doc = (ROOT / "docs" / "metrics.md").read_text(encoding="utf-8")
+
+    def test_every_exported_metric_is_documented(self):
+        names = exported_metrics()
+        self.assertEqual(len(names), 7, names)
+        for name in sorted(names):
+            with self.subTest(metric=name):
+                self.assertIn(f"`{name}`", self.metrics_doc)
+
+    def test_every_job_and_probe_module_is_documented(self):
+        for rel in ("prometheus/scrape/fxserver.yml", "prometheus/scrape/tunnel.yml"):
+            for job in check_pack.load_yaml((ROOT / rel).read_text(encoding="utf-8"))["scrape_configs"]:
+                with self.subTest(job=job["job_name"]):
+                    self.assertIn(f"`{job['job_name']}`", self.metrics_doc)
+        blackbox = check_pack.load_yaml((ROOT / "blackbox" / "blackbox.yml").read_text(encoding="utf-8"))
+        for module in blackbox["modules"]:
+            with self.subTest(module=module):
+                self.assertIn(f"`{module}`", self.metrics_doc)
+
+    def test_the_end_to_end_run_expects_exactly_these_metrics(self):
+        self.assertEqual(smoke_exporters.EXPECTED_METRICS, exported_metrics())
+
+
+PROMETHEUS_SERIES_PER_TARGET = 5  # up, scrape_duration_seconds, scrape_samples_*, scrape_series_added
+
+
+def scrape_jobs(rel: str) -> list[dict]:
+    return check_pack.load_yaml((ROOT / rel).read_text(encoding="utf-8"))["scrape_configs"]
+
+
+def targets_of(job: dict) -> int:
+    return sum(len(group["targets"]) for group in job["static_configs"])
+
+
+def series_limit(rel: str) -> int:
+    """Upper bound of the series of one scrape file: per target its sample_limit plus Prometheus' own."""
+    return sum(targets_of(job) * (job["sample_limit"] + PROMETHEUS_SERIES_PER_TARGET) for job in scrape_jobs(rel))
+
+
+def markdown_table(text: str, heading: str) -> list[list[str]]:
+    """The body rows of the first table after a heading, as lists of stripped cells."""
+    section = text.split(f"\n{heading}\n", 1)[1].split("\n## ", 1)[0]
+    rows = [line.strip().strip("|").split("|") for line in section.splitlines() if line.startswith("|")]
+    return [[cell.strip() for cell in row] for row in rows[2:]]
+
+
+def number(text: str) -> int:
+    return int(re.search(r"\d[\d,]*", text).group(0).replace(",", ""))
+
+
+class CardinalityDocTest(unittest.TestCase):
+    def setUp(self):
+        self.doc = (ROOT / "docs" / "cardinality.md").read_text(encoding="utf-8")
+        self.jobs = {job["job_name"]: job for job in scrape_jobs("prometheus/scrape/fxserver.yml")}
+
+    def test_the_measured_table_matches_the_scrape_config(self):
+        rows = markdown_table(self.doc, "## Measured: the pack's jobs")
+        total = rows.pop()
+        targets_per_job: dict[str, int] = {}
+        for job_cell, samples, own, limit in rows:
+            job = self.jobs[re.match(r"`(\w+)`", job_cell).group(1)]
+            targets_per_job[job["job_name"]] = targets_per_job.get(job["job_name"], 0) + 1
+            with self.subTest(row=job_cell):
+                self.assertEqual(number(limit), job["sample_limit"])
+                self.assertEqual(number(own), PROMETHEUS_SERIES_PER_TARGET)
+                self.assertLessEqual(number(samples), job["sample_limit"])
+        self.assertEqual(targets_per_job, {name: targets_of(job) for name, job in self.jobs.items()})
+        self.assertEqual(number(total[0]), smoke_exporters.EXPECTED_TARGETS)
+        self.assertEqual(number(total[1]), sum(number(row[1]) for row in rows))
+        self.assertEqual(number(total[2]), PROMETHEUS_SERIES_PER_TARGET * len(rows))
+        self.assertIn(f"costs **{number(total[1]) + number(total[2])} series**", self.doc)
+
+    def test_the_budget_table_uses_the_sample_limits_and_adds_up(self):
+        rows = {row[0]: row[1] for row in markdown_table(self.doc, "## The whole budget per server")}
+        default_jobs = series_limit("prometheus/scrape/fxserver.yml")
+        tunnel = series_limit("prometheus/scrape/tunnel.yml")
+        self.assertIn(f"at most {default_jobs} by the sample limits", rows["This pack, default jobs"])
+        self.assertEqual(rows["This pack, tunnel probe"], f"at most {tunnel}")
+        reserves = sum(number(series) for part, series in rows.items() if part.startswith("Reserve:"))
+        self.assertEqual(rows["**Total**"], f"**at most {default_jobs + tunnel + reserves:,}**")
+        self.assertLessEqual(default_jobs + tunnel + reserves, 2000)
+        measured = number(rows["This pack, default jobs"])
+        free = 2000 - measured - reserves
+        self.assertIn(f"limit of {default_jobs}, and without the tunnel probe, {free:,} of the 2,000", " ".join(
+            self.doc.split()))
+        self.assertIn(f"({free - tunnel:,} with the tunnel probe at its limit)", self.doc)
+
+
+class BuildLabelTest(unittest.TestCase):
+    def test_the_build_rule_reads_both_version_shapes(self):
+        job = {j["job_name"]: j for j in scrape_jobs("prometheus/scrape/fxserver.yml")}["fxserver_json"]
+        rule = next(r for r in job["metric_relabel_configs"] if r.get("target_label") == "build")
+        self.assertEqual(rule["source_labels"], ["__name__", "version"])
+        self.assertEqual(rule["replacement"], "$1")
+        for version in ("FXServer-master SERVER v1.0.0.35245 linux", "FXServer-master v1.0.0.35245 linux"):
+            with self.subTest(version=version):
+                # Prometheus anchors the regex and joins the source labels with ";".
+                match = re.fullmatch(rule["regex"], f"fxserver_info;{version}")
+                self.assertIsNotNone(match)
+                self.assertEqual(match.group(1), "35245")
+        self.assertIsNone(re.fullmatch(rule["regex"], "fxserver_info;FXServer-master linux"))
 
 
 @NEEDS_YAML

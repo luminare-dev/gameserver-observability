@@ -1,0 +1,44 @@
+# json_exporter modules for the game server's status endpoints (json_exporter 0.8.0 format).
+# Prometheus passes the module and the target URL per scrape (job fxserver_json in
+# prometheus/scrape/fxserver.yml). Run json_exporter on loopback or a private address only:
+#   json_exporter --config.file=/etc/json_exporter/config.yml --web.listen-address=127.0.0.1:7979
+#
+# Counts only: the player count comes from dynamic.json, never from players.json, and no label
+# holds a player's name, identifier or address (scripts/check_pack.py fails on either).
+# Exported names and fields: docs/metrics.md.
+modules:
+  # GET /dynamic.json -> {"clients": 3, "sv_maxclients": "32", ...}
+  fxserver_dynamic:
+    metrics:
+      - name: fxserver_clients
+        help: Connected clients (dynamic.json clients)
+        path: '{ .clients }'
+        valuetype: gauge
+      - name: fxserver_max_clients
+        help: Player slots (dynamic.json sv_maxclients)
+        path: '{ .sv_maxclients }'
+        valuetype: gauge
+    http_client_config:
+      follow_redirects: false
+
+  # GET /info.json -> {"server": "FXServer-master v1.0.0.35245 linux", "vars": {...}, ...}
+  fxserver_info:
+    metrics:
+      # An object metric is named <name>_<value key>, so this one is fxserver_info. The build
+      # label is added from version by the scrape config.
+      - name: fxserver
+        type: object
+        help: Server version string (info.json server); the value is always 1
+        path: '{ @ }'
+        labels:
+          version: '{ .server }'
+        values:
+          info: 1
+        valuetype: gauge
+      - name: fxserver_onesync_enabled
+        help: 1 when OneSync is enabled (info.json vars.onesync_enabled)
+        path: '{ .vars.onesync_enabled }'
+        allow_missing_key: true
+        valuetype: gauge
+    http_client_config:
+      follow_redirects: false

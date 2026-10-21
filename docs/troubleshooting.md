@@ -46,6 +46,66 @@ release's `sha256sums.txt` and change both in `ci.yml` and [toolchain.md](toolch
 **Fix:** install it as shown on the [toolchain page](toolchain.md) and add its folder to the
 `PATH`, for example `PATH="$PWD:$PATH" bash scripts/check_promtool.sh`.
 
+## `server returned HTTP status 401 Unauthorized` on the `fxserver_perf` target
+
+**Cause:** the server refused the credentials. It compares the whole `Authorization` header, so
+the user in `basic_auth.username` and the content of the password file must equal
+`sv_prometheusBasicAuthUser` and `sv_prometheusBasicAuthPassword` exactly. Prometheus strips
+leading and trailing whitespace, including the newline, from the password file and keeps the
+spaces inside the password, so a server password that starts or ends with a space never matches.
+
+**Fix:** compare the values (choose a password without leading or trailing spaces), then check
+that Prometheus can read the file (its user needs read access to
+`/etc/prometheus/secrets/fxserver_perf`) and that the server was restarted after the variables
+changed.
+
+## `sample limit exceeded` on a target
+
+**Cause:** the target served more series than the job's `sample_limit`, so Prometheus dropped the
+whole scrape. With the shipped configs this happens only when a server version or an exporter
+version serves many more series than measured in the [cardinality budget](cardinality.md).
+
+**Fix:** look at what the target serves (for an exporter job, open its `/probe` URL with the same
+`module` and `target`), then raise the limit in the scrape job if the new series are expected.
+
+## `Failed to fetch JSON response` in the json_exporter log, target answers `503`
+
+**Cause:** json_exporter could not get a 2xx answer from `dynamic.json` or `info.json`: the server
+is down, the address is wrong, or the server refused the request. A `403` with the body `Nope.`
+comes from `sv_requestParanoia` when a proxy between json_exporter and the server adds a `Via`
+header (level 1 or higher); a `429` means that address sent `info.json` more requests than the
+server allows (4 per second, burst 10).
+
+**Fix:** scrape the server directly (no proxy), or lower `sv_requestParanoia`; keep the JSON jobs
+at 30 seconds or more.
+
+## `probe_success{module="http_401_expected"}` is 0
+
+**Cause:** `/perf/` answered without credentials, because neither `sv_prometheusBasicAuthUser`
+nor `sv_prometheusBasicAuthPassword` is set on the server.
+
+**Fix:** set both ([configuration](configuration.md#game-server)) and restart the server; see
+the [runbook](runbook.md#failure-the-probe-http_401_expected-fails).
+
+## `check_pack: … [parse] line N: …`
+
+**Cause:** `scripts/check_pack.py` reads only the YAML the configs need. Values such as `yes`,
+`no`, `on` or `off`, numbers with a leading zero, dates, block scalars (`|`, `>`), anchors, values
+that continue on the next line, and `:` inside an unquoted value in `[...]` are refused instead of
+guessed.
+
+**Fix:** quote the value or write it on one line, and use `true`/`false` for booleans, as the
+other configs do.
+
+## `smoke_exporters: port(s) in use on 127.0.0.1`
+
+**Cause:** the end-to-end run needs the ports of the shipped configs: 30120 (fake server), 7979
+(json_exporter) and 9115 (blackbox_exporter).
+
+**Fix:** stop what uses them, or run the script in a container without published ports, for
+example `docker run --rm --network none -v "$PWD":/repo:ro -v "$PWD/bin":/opt/bin:ro python:3.13-slim
+python3 -I /repo/scripts/smoke_exporters.py --bin-dir /opt/bin`.
+
 ## Still stuck?
 
 Search the [issues](https://github.com/luminare-dev/gameserver-observability/issues), then ask in
