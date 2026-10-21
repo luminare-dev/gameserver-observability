@@ -30,9 +30,9 @@ usually means writing scrape configs, PromQL and panels by hand, and it is easy 
 than needed, such as player names or identifiers. This pack does it from outside the server
 process, with no resource running inside the game server and with player counts only. The
 repository holds the scrape jobs, the json_exporter and blackbox_exporter modules, recording rules
-and twelve alerts with a runbook section each, a reference of every metric with how far it is
-verified, and a fake server that CI scrapes through the real exporters; the dashboards are not in
-it yet (see [Limitations](#limitations)).
+and twelve alerts with a runbook section each, a Grafana dashboard with a copy for sharing, a
+reference of every metric with how far it is verified, and a fake server that CI scrapes through
+the real exporters.
 
 ## Quickstart
 
@@ -52,8 +52,9 @@ test -e /etc/blackbox_exporter/blackbox.yml || sudo install -D -m 0644 blackbox/
 Then set the targets and the `server` label in the scrape jobs, include them with
 `scrape_config_files` and the rules with `rule_files`, set `sv_prometheusBasicAuthUser` and
 `sv_prometheusBasicAuthPassword` on the game server and write the password into
-`/etc/prometheus/secrets/fxserver_perf` ([Configuration](docs/configuration.md)). There is no
-release yet; once there is, check out its tag instead of `main`.
+`/etc/prometheus/secrets/fxserver_perf` ([Configuration](docs/configuration.md)). The dashboard
+is installed on the Grafana host ([Dashboards](docs/install.md#dashboards)). There is no release
+yet; once there is, check out its tag instead of `main`.
 
 ## How it works
 
@@ -61,7 +62,7 @@ release yet; once there is, check out its tag instead of `main`.
 flowchart LR
     subgraph game["Game server host"]
         fx["FXServer, port 30120<br/>/perf/, info.json, dynamic.json"]
-        node["node_exporter, mysqld_exporter<br/>(your own jobs)"]
+        node["node_exporter, mysqld_exporter, cloudflared<br/>(your own jobs)"]
     end
     subgraph mon["Prometheus host, exporters on 127.0.0.1"]
         prom["Prometheus<br/>prometheus/scrape/*.yml<br/>rules/*.yml"]
@@ -69,13 +70,15 @@ flowchart LR
         bb["blackbox_exporter :9115<br/>blackbox/blackbox.yml"]
     end
     list["Version list<br/>(optional, public)"]
+    graf["Grafana<br/>grafana/dashboards/"]
     prom -- "GET /perf/ with basic auth<br/>tickTime renamed to fxserver_tick_time_seconds" --> fx
     prom -- "/probe" --> je
     je -- "GET dynamic.json, info.json<br/>counts, slots, version; never players.json" --> fx
     je -- "Recommended build" --> list
     prom -- "/probe" --> bb
     bb -- "TCP 30120, GET info.json,<br/>GET /perf/ must answer 401" --> fx
-    prom -- "disk, build textfile, database" --> node
+    prom -- "host, build textfile, database, tunnel" --> node
+    graf -- "PromQL, one data source variable" --> prom
 ```
 
 Prometheus scrapes `/perf/` itself, keeps only the tick-time histogram and renames it with a
@@ -105,10 +108,23 @@ named by the game server's `server` label, with a severity and a link to its
 | `HostDiskAlmostFull` | a disk is more than 85 % full |
 | `MariaDBDown`, `MariaDBSlowQueries` | the database is down, or runs more than one slow query a minute |
 
+The dashboard "Game server overview" (`grafana/dashboards/`) shows these series in six rows:
+an overview (status, players, slots in use, `svMain` p95, build, build age, restarts, alerts),
+tick time (a heatmap of the `svMain` histogram, p95 and p99 per thread, ticks per second, mean),
+players, host, MariaDB, and probes and tunnel. Its variables pick the data source and the game
+servers; the file stores no data source and no server name. `grafana/dashboards/shareable/` holds
+a copy without variables for importing elsewhere ([ADR 0018](docs/adr/0018-dashboard-with-a-shareable-copy.md)). Grafana
+provisioning files load it into a folder "Game server". `scripts/lint_dashboards.py` checks that
+titles carry no platform or vendor mark, that no data source uid is stored, that every query
+reads only metrics of the [metrics reference](docs/metrics.md), no label tied to a player and no
+`instance`, that the copy matches, and parses every query with promtool
+([ADR 0019](docs/adr/0019-dashboard-check-in-standard-library-python.md)).
+
 Every pull request runs, besides the template's checks: the unit tests (including the fake
-server, the pack check and the shape of every rule) in `ci / lint-test`; `promtool check rules`,
-the promtool rule tests (a case where each alert fires and one where it must stay quiet),
-`promtool check config` and the privacy rules on the configs in the `promtool` job
+server, the pack check, the dashboard check and the shape of every rule) in `ci / lint-test`;
+`promtool check rules`, the promtool rule tests (a case where each alert fires and one where it
+must stay quiet), `promtool check config` and the privacy rules on the configs, and the dashboard
+check with every query parsed by promtool in the `promtool` job
 ([ADR 0011](docs/adr/0011-pack-check-in-standard-library-python.md)); and in the `exporters` job
 the pinned Prometheus, json_exporter and blackbox_exporter with the configs and the rules against
 the fake server, checking names, labels, values, that `players.json` is never requested, and that
@@ -124,9 +140,10 @@ What is in the repository today:
 | `prometheus/scrape/` | `fxserver.yml` (jobs `fxserver_perf`, `fxserver_json`, `fxserver_blackbox`) and the optional `tunnel.yml` (`fxserver_tunnel`) and `versions.yml` (`fxserver_versions`) |
 | `json_exporter/`, `blackbox/` | the exporter modules |
 | `rules/` | the recording rules and the alerts, in five files by the data they need |
+| `grafana/` | the dashboard, its shareable copy in `dashboards/shareable/`, and the provisioning files for the dashboard folder and an optional data source |
 | `demo/fake-fxserver/` | the fake game server: synthetic data, basic auth on `/perf/`, a load knob for tick-time spikes |
-| `scripts/` | `check_pack.py` (config checks), `smoke_exporters.py` (end-to-end run), `test.sh` (the test command), `check_promtool.sh` (rule checks and rule tests), and the template's checks for wording, names, byline, workflow pins and the release archive |
-| `tests/` | unit tests for the fake server, the pack check, the rules, the scripts and this repository's setup; `tests/rules/` holds the promtool rule tests |
+| `scripts/` | `check_pack.py` (config checks), `lint_dashboards.py` (dashboard checks, and `--fix` writes the shareable copies), `smoke_exporters.py` (end-to-end run), `test.sh` (the test command), `check_promtool.sh` (rule checks and rule tests), and the template's checks for wording, names, byline, workflow pins and the release archive |
+| `tests/` | unit tests for the fake server, the pack check, the dashboard check, the rules, the scripts and this repository's setup; `tests/rules/` holds the promtool rule tests |
 | `docs/` | metrics reference, cardinality budget, installation, configuration, upgrade, troubleshooting, runbook (a section per alert), toolchain pins and the ADRs |
 | `.github/workflows/` | CI (`ci.yml` with the `promtool` and `exporters` jobs), secret scan, pull request title check, release, OpenSSF Scorecard |
 
@@ -164,6 +181,10 @@ The decisions behind this project are recorded as short ADRs in [docs/adr/](docs
   (why the reset of the tick counter instead of a scrape gap or any empty period)
 - [ADR 0017: Build age and the Recommended build](docs/adr/0017-build-age-and-the-recommended-build.md)
   (why the switch time and the public version list instead of release dates)
+- [ADR 0018: Dashboard with a shareable copy](docs/adr/0018-dashboard-with-a-shareable-copy.md)
+  (why a generated copy without variables instead of Grafana's export, and why no resources row)
+- [ADR 0019: Dashboard check in standard-library Python](docs/adr/0019-dashboard-check-in-standard-library-python.md)
+  (why a small query reader plus promtool instead of Grafana's linter or a PromQL package)
 
 ## Supported versions
 
@@ -174,7 +195,9 @@ The decisions behind this project are recorded as short ADRs in [docs/adr/](docs
 | blackbox_exporter | 0.29.0 | 0.29.0 |
 | FXServer | build 35245, read in its source code; not yet run against a live server | the endpoints of build 35245 |
 | promtool (rule checks and rule tests in CI) | 3.15.0 | 3.15.0 (pinned in `ci.yml`) |
-| node_exporter, mysqld_exporter (host, build and database alerts) | not run here; the rules are tested with promtool on the documented metric names | the versions you run, scraped by your own jobs |
+| node_exporter, mysqld_exporter (host, build and database alerts) | node_exporter 1.12.1 and mysqld_exporter 0.20.0 with MariaDB 11.8.9 in the dashboard check; the rules are tested with promtool on the documented metric names | the versions you run, scraped by your own jobs |
+| Grafana (dashboard) | 13.2.4 (provisioning, every query, the import of the shareable copy) | 13.2.4; the dashboard uses schema 42, the latest of 13.2.4, and other versions have not been tried |
+| cloudflared (tunnel panels) | 2026.10.2 in the dashboard check | the versions you run, scraped by your own job |
 | Python (scripts, fake server and tests) | 3.10.22, 3.12.15, 3.14.3 | 3.10 or newer |
 
 Fixes go into the latest minor release only. See the
@@ -182,13 +205,20 @@ Fixes go into the latest minor release only. See the
 
 ## Limitations
 
-- No dashboards or demo stack yet, and no Alertmanager configuration: the alerts are evaluated
-  and shown in Prometheus, and routing them is left to your Alertmanager.
-- The host, build and database alerts read node_exporter and mysqld_exporter, which this pack does
-  not ship or run in its tests; their rules are tested with promtool only. The build alerts need
-  the textfile metrics of the `luminare.gameserver` collection's `fxserver` role (or a file of
-  the same shape), and `FXServerBuildBehindRecommended` the optional version list job, which no
-  alert watches itself.
+- No demo stack and no screenshots yet, and no Alertmanager configuration: the alerts are
+  evaluated and shown in Prometheus and on the dashboard, and routing them is left to your
+  Alertmanager.
+- The dashboard was run on Grafana 13.2.4 here, by hand (see [Results](#results)); CI checks its
+  JSON and parses every query with promtool, but does not start Grafana. It has no row for the
+  game server's resources (scripts and assets), because the pack does not collect the resource
+  list ([ADR 0018](docs/adr/0018-dashboard-with-a-shareable-copy.md)).
+- The host, build and database alerts read node_exporter and mysqld_exporter, and the dashboard
+  also cloudflared; this pack does not ship them or run them in CI, so the alerts on them are
+  tested with promtool only. The build alerts need the textfile metrics of the `luminare.gameserver`
+  collection's `fxserver` role (or a file of the same shape), and `FXServerBuildBehindRecommended`
+  the optional version list job, which no alert watches itself. In the dashboard check,
+  cloudflared had no reachable edge and passed no requests, so its request panel was seen at 0
+  only.
 - The end-to-end run checks the rules on live data for a healthy server, a tick-time spike and a
   stopped server. Every other firing case, among them the alerts with long windows (no players
   after a restart, the build alerts), is tested with promtool only.
@@ -218,10 +248,14 @@ Fixes go into the latest minor release only. See the
 | Pack check | 0 findings in 5 files; `promtool check config --lint=all` passed for 3 files | `python3 scripts/check_pack.py --require-promtool` with promtool 3.15.0, 2026-10-21 |
 | YAML reader against PyYAML | 0 files read differently out of 214 (52 read alike, 162 refused) | the reader of `scripts/check_pack.py` and PyYAML 6.0.3 on the YAML files of this project's repositories and of installed Python packages, 2026-10-21 |
 | Installation steps | 7 of 7 targets up, 5 rule groups evaluated without an error, no alert active | the commands of [Installation](docs/install.md), with the optional version list job, as root in a `python:3.13-slim` container against the fake server, 2026-10-21 |
-| Unit tests | 209 run, 0 failed, 1 skipped; 25 for the fake server, 38 for the pack check, 30 for this repository's setup, 19 for the rules | `bash scripts/test.sh` with gitleaks 8.30.1, markdownlint-cli2 0.23.2 and promtool 3.15.0 on the `PATH`, Python 3.14.3, 2026-10-21 (the skipped test applies only to the template repository) |
-| Unit tests, CI mode | 209 run, 0 failed, 3 skipped | `CI=true bash scripts/test.sh` without gitleaks, markdownlint-cli2 and promtool on the `PATH`, Python 3.14.3, 2026-10-21: the script downloaded gitleaks 8.30.1 and checked its sha256, so the secret-rule tests ran |
-| Unit tests, other Pythons | 209 run, 0 failed, 11 skipped on each | `bash scripts/test.sh` on Python 3.10.22 and 3.12.15 (`python:3.10-slim`, `python:3.12-slim` plus git, without gitleaks, markdownlint-cli2 and promtool), 2026-10-21 |
-| Secret scan | 0 leaks in 4 commits | `gitleaks git --redact --config .gitleaks.toml .`, gitleaks 8.30.1, 2026-10-21 |
+| Dashboard on a fresh Grafana | the folder "Game server" with the dashboard and the data source "Game server metrics" provisioned from the repository's files alone; 37 of 37 queries (36 panel queries and the alert annotation) returned data; the shareable copy imported with one data source input and no variable left, and 37 of 37 of its queries returned data; both opened in a browser with every panel drawn | Grafana 13.2.4 (`grafana/grafana:13.2.4` container, the steps of [Dashboards](docs/install.md#dashboards)) on Prometheus 3.15.0 with the pack's configs and rules, json_exporter 0.8.0, blackbox_exporter 0.29.0, node_exporter 1.12.1, mysqld_exporter 0.20.0 with MariaDB 11.8.9 and cloudflared 2026.10.2, against the fake server and a local HTTPS stand-in for the admin hostname; queries through Grafana's query API over 30 minutes, then screenshots with headless Chromium, 2026-10-21 |
+| Dashboard schema | 42, the latest of Grafana 13.2.4 | a dashboard saved with schema 30 came back as 42 from Grafana's dashboard API (`dashboard.grafana.app/v1beta1`), 2026-10-21 |
+| Dashboard removal | with only the dashboard files removed the dashboard stayed; with the provisioning file removed too it was gone after a restart (its empty folder stayed); the data source was gone after a restart with a `deleteDatasources` file | the commands of [Uninstall](docs/install.md#uninstall) for Grafana, on a second fresh `grafana/grafana:13.2.4` container, 2026-10-21 |
+| Dashboard check | 0 findings in 2 files; 75 queries (37 per file and the variable query) passed `promtool check rules` | `python3 scripts/lint_dashboards.py --require-promtool` with promtool 3.15.0, 2026-10-21 |
+| Unit tests | 254 run, 0 failed, 1 skipped; 25 for the fake server, 38 for the pack check, 45 for the dashboard check, 30 for this repository's setup, 19 for the rules | `bash scripts/test.sh` with gitleaks 8.30.1, markdownlint-cli2 0.23.2 and promtool 3.15.0 on the `PATH`, Python 3.14.3, 2026-10-21 (the skipped test applies only to the template repository) |
+| Unit tests, CI mode | 254 run, 0 failed, 5 skipped | `CI=true bash scripts/test.sh` without gitleaks, markdownlint-cli2 and promtool on the `PATH`, Python 3.14.3, 2026-10-21: the script downloaded gitleaks 8.30.1 and checked its sha256, so the secret-rule tests ran |
+| Unit tests, other Pythons | 254 run, 0 failed, 13 skipped on each | `bash scripts/test.sh` on Python 3.10.22 and 3.12.15 (`python:3.10-slim`, `python:3.12-slim` plus git, without gitleaks, markdownlint-cli2 and promtool), 2026-10-21 |
+| Secret scan | 0 leaks in 5 commits | `gitleaks git --redact --config .gitleaks.toml .`, gitleaks 8.30.1, 2026-10-21 |
 | Wording, name and placeholder check | 0 findings, 0 warnings | `python3 scripts/forbidden_words.py` in publish mode, 2026-10-21 |
 
 ## Documentation and links

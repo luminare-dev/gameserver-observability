@@ -1,0 +1,20 @@
+# Grafana data source for the pack's dashboards (docs/install.md#dashboards). The dashboards
+# choose their data source with a variable, so they also work with a Prometheus data source you
+# already have; install this file only if Grafana has none for the pack's metrics, and set url to
+# your Prometheus. It is named after its content, not after the data source type, so that it never
+# replaces a data source of yours called "Prometheus".
+#   install -D -m 0644 grafana/provisioning/datasources/gameserver-observability.yml \
+#     /etc/grafana/provisioning/datasources/gameserver-observability.yml
+apiVersion: 1
+datasources:
+  - name: Game server metrics
+    uid: gso-prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    editable: false
+    jsonData:
+      # Grafana's $__rate_interval is at least four times this value. With 30 s the rate panels
+      # use windows of 2 minutes or more, which hold two samples even of jobs that are scraped
+      # once a minute (Prometheus' default interval).
+      timeInterval: 30s

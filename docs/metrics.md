@@ -8,7 +8,8 @@ and no label holds a player's name, identifier, address or anything else tied to
 ([Not collected](#not-collected)). How many series this makes per server:
 [cardinality budget](cardinality.md). The rules in `rules/` add
 [recorded series](#recorded-series-rulesfxserverrecordingyml) and also read a few
-[series of other exporters](#series-the-rules-read-from-other-exporters).
+[series of other exporters](#series-the-rules-read-from-other-exporters), and the dashboard reads
+[a few more](#series-the-dashboard-reads-from-other-exporters).
 
 ## How far each metric is verified
 
@@ -144,7 +145,11 @@ access-protected tunnel publishes, for example the txAdmin web interface, with t
 `http_access_protected`: a `GET` without a login must answer `302`, `303` or `403` over HTTPS.
 The series are the HTTP ones above, plus the TLS series blackbox_exporter adds for HTTPS targets
 (certificate expiry, TLS version). Verified: unverified, because no tunnel exists here; the job
-is not part of the `exporters` run.
+is not part of the `exporters` run. The dashboard reads one of the TLS series:
+
+| Metric | Type | Labels | Source endpoint and field | Verified |
+|---|---|---|---|---|
+| `probe_ssl_earliest_cert_expiry` | gauge (Unix time) | `server`, `module` | the expiry of the certificate in the hostname's chain that expires first | exporter (blackbox_exporter 0.29.0 against a local HTTPS stand-in with a test certificate, 2026-10-21) |
 
 ## Job `fxserver_versions` (optional): the Recommended build
 
@@ -199,9 +204,13 @@ lists the labels the series keep ([ADR 0014](adr/0014-tick-time-over-one-minute-
 - **Checked:** `tests/rules/recording.test.yml` computes each series from hand-made histograms,
   and the `exporters` run checks that each one exists per thread on the fake server's data.
 
-Alerts that are pending or firing also appear as the series `ALERTS` and `ALERTS_FOR_STATE`, with
-the alert's labels (`alertname`, `server`, `severity` and, for some alerts, `thread`, `job` or
-`mountpoint`).
+Alerts that are pending or firing also appear as series; the dashboard reads `ALERTS` for its
+alert count, its alert table and its annotations:
+
+| Series | Labels | Meaning |
+|---|---|---|
+| `ALERTS` | `alertname`, `alertstate` (`pending` or `firing`), `server`, `severity` and, for some alerts, `thread`, `job` or `mountpoint` | 1 for every alert that is pending or firing |
+| `ALERTS_FOR_STATE` | the same, without `alertstate` | the Unix time the alert became active; Prometheus uses it to keep the `for` wait across a restart |
 
 ## Series the rules read from other exporters
 
@@ -220,6 +229,34 @@ target the `server` label of its game server
 The two textfile metrics have no labels of their own: `fxserver_artifact_build` is the build
 number the `current` link points to, `fxserver_artifact_installed_timestamp_seconds` the Unix time
 that link was last replaced. Any other tool can write the same file for the alerts to work.
+
+## Series the dashboard reads from other exporters
+
+The dashboard ([`grafana/dashboards/`](../grafana/dashboards/)) reads the series above and these,
+from the same jobs of your own plus one for the tunnel connector, each target with the `server`
+label of its game server ([configuration](configuration.md#host-and-database-jobs)). Without a
+job, its panels show no data; nothing else depends on them. `scripts/lint_dashboards.py` fails
+when a dashboard query reads a metric that is not in a table of this page.
+
+| Metric | Exporter | Labels the dashboard uses | Panel |
+|---|---|---|---|
+| `node_cpu_seconds_total` | node_exporter, cpu collector (on by default) | `server`, `mode` (`idle`, `steal`) | CPU |
+| `node_memory_MemAvailable_bytes`, `node_memory_MemTotal_bytes` | node_exporter, meminfo collector (on by default) | `server` | Memory |
+| `node_network_receive_bytes_total`, `node_network_transmit_bytes_total` | node_exporter, netdev collector (on by default) | `server`, `device` (all but `lo`) | Network |
+| `mysql_global_status_queries` | mysqld_exporter, global status collector (on by default) | `server` | Queries per second |
+| `mysql_global_status_threads_connected`, `mysql_global_variables_max_connections` | mysqld_exporter, global status and global variables collectors (on by default) | `server` | Connections |
+| `mysql_global_status_innodb_buffer_pool_reads`, `mysql_global_status_innodb_buffer_pool_read_requests` | mysqld_exporter, global status collector | `server` | Buffer pool hit ratio |
+| `cloudflared_tunnel_ha_connections` | cloudflared, metrics endpoint (`--metrics 127.0.0.1:2000`) | `server` | Tunnel connections |
+| `cloudflared_tunnel_total_requests`, `cloudflared_tunnel_request_errors` | the same | `server` | Tunnel requests |
+
+The names and types were read from node_exporter 1.12.1, mysqld_exporter 0.20.0 (with MariaDB
+11.8.9) and cloudflared 2026.10.2 on 2026-10-21, in the dashboard check described in the README's
+Results. cloudflared counts an edge connection in `cloudflared_tunnel_ha_connections` also while
+it retries it (seen with an unreachable edge), so the dashboard shows it next to the admin
+hostname probe. Prometheus 3 adds an information notice ("metric might not be a counter") to
+`rate()` over counters whose names do not end in `_total`, such as mysqld_exporter's global status
+counters and cloudflared's request counters; Grafana shows it as an icon on the panel, and the
+values are right.
 
 ## Request paranoia and rate limits
 

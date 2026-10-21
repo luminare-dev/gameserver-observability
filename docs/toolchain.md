@@ -51,6 +51,25 @@ tar -xzf prometheus-3.15.0.linux-amd64.tar.gz -C bin --strip-components=1 promet
 python3 scripts/smoke_exporters.py --bin-dir bin
 ```
 
+## Checked locally, not in CI
+
+The dashboard check of 2026-10-21 (README, Results) ran the dashboard on a real Grafana with the
+exporters whose series its host, MariaDB and tunnel rows read. CI does not download these; the
+dashboard check in CI (`scripts/lint_dashboards.py`) needs only Python and promtool. The
+downloads were checked against the checksums named below:
+
+| Tool | Version | File or image, sha256 |
+|---|---|---|
+| Grafana | 13.2.4 | image `grafana/grafana:13.2.4@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f` |
+| node_exporter | 1.12.1 | `node_exporter-1.12.1.linux-amd64.tar.gz`, `b51d8a76aa2a9156a55d501aca6276fae09e262259a5e4e831d2c2222f084e63` (the release's `sha256sums.txt`) |
+| mysqld_exporter | 0.20.0 | `mysqld_exporter-0.20.0.linux-amd64.tar.gz`, `5773496e9962ca3817b3599fe4d74f218c95c1295eb2a742462df8e035fe51bd` (the release's `sha256sums.txt`) |
+| cloudflared | 2026.10.2 | `cloudflared-linux-amd64`, `35fbdd2beb378436c7da377d7358cea8e33f9c94a6705d1d8036bf9b0d6d8005` (the checksum in the release notes) |
+| MariaDB | 11.8.9 | image `mariadb:11.8@sha256:f16d7a344413e519dff518f27bdb221388f84b0d274c97c4fb5f2cb0dc1b34fa` |
+
+`scripts/lint_dashboards.py` records the Grafana version and its dashboard schema version (42)
+in `GRAFANA_VERSION` and `SCHEMA_VERSION`; a dashboard saved by a newer Grafana fails the check
+until it has been tried on that version and both values are updated.
+
 ## Python packages
 
 | File | Used by | How it is installed |

@@ -141,6 +141,26 @@ other configs do.
 example `docker run --rm --network none -v "$PWD":/repo:ro -v "$PWD/bin":/opt/bin:ro python:3.13-slim
 python3 -I /repo/scripts/smoke_exporters.py --bin-dir /opt/bin`.
 
+## A dashboard panel shows "No data"
+
+**Cause:** the panel's series are not in the selected data source: the Data source selector points
+to another Prometheus, the job for that row is not scraped (node_exporter for Host, mysqld_exporter
+for MariaDB, cloudflared for the tunnel, the optional `fxserver_tunnel` job for the admin hostname),
+or its targets have no `server` label, so the Game server filter does not match them. The Game
+server selector is empty when the job `fxserver_perf` has no target with a `server` label.
+
+**Fix:** choose the data source that has the pack's series, and give every target of those jobs
+the `server` label of its game server ([configuration](configuration.md#host-and-database-jobs)).
+Panels of exporters you do not run stay empty; that is expected.
+
+## `lint_dashboards: … [shareable] missing or not the copy of …`
+
+**Cause:** a dashboard in `grafana/dashboards/` changed, and its copy in
+`grafana/dashboards/shareable/` was not written again.
+
+**Fix:** run `python3 scripts/lint_dashboards.py --fix`, then the check again, and commit both
+files. A finding `[parse] … not in the repository's format` has the same fix.
+
 ## Still stuck?
 
 Search the [issues](https://github.com/luminare-dev/gameserver-observability/issues), then ask in

@@ -1,10 +1,11 @@
 # Configuration
 
 The pack is configuration: the scrape jobs in `prometheus/scrape/`, the json_exporter modules in
-`json_exporter/config.yml`, the blackbox_exporter modules in `blackbox/blackbox.yml` and the
-recording and alerting rules in `rules/`. Change the values below for your servers, then run
-`python3 scripts/check_pack.py` and `bash scripts/check_promtool.sh` (with promtool on the
-`PATH`) before you load them. [Metrics reference](metrics.md) describes what each job collects.
+`json_exporter/config.yml`, the blackbox_exporter modules in `blackbox/blackbox.yml`, the
+recording and alerting rules in `rules/` and the dashboard in `grafana/`. Change the values below
+for your servers, then run `python3 scripts/check_pack.py`, `bash scripts/check_promtool.sh` and
+`python3 scripts/lint_dashboards.py` (with promtool on the `PATH`) before you load them.
+[Metrics reference](metrics.md) describes what each job collects.
 
 The pack check accepts only loopback and documentation addresses (`192.0.2.0/24`,
 `198.51.100.0/24`, `203.0.113.0/24`, `2001:db8::/32`), so that no real address gets into this
@@ -80,9 +81,12 @@ do not need it.
 
 ### Host and database jobs
 
-Some alerts read node_exporter and mysqld_exporter ([metrics reference](metrics.md#series-the-rules-read-from-other-exporters)).
-This pack ships no jobs for them, because most setups scrape these exporters already. Give each of
-their targets the `server` label of the game server it belongs to, so that the alerts name it:
+Some alerts read node_exporter and mysqld_exporter ([metrics reference](metrics.md#series-the-rules-read-from-other-exporters)),
+and the dashboard also reads the metrics of the tunnel connector, cloudflared
+([metrics reference](metrics.md#series-the-dashboard-reads-from-other-exporters)). This pack ships
+no jobs for them, because most setups scrape these exporters already. Give each of their targets
+the `server` label of the game server it belongs to, so that the alerts and the dashboard name
+it:
 
 ```yaml
 scrape_configs:
@@ -96,13 +100,75 @@ scrape_configs:
       - targets: ["127.0.0.1:9104"]
         labels:
           server: game-01
+  - job_name: cloudflared
+    static_configs:
+      - targets: ["127.0.0.1:2000"]
+        labels:
+          server: game-01
 ```
+
+cloudflared serves its metrics only with `--metrics <address>` (for example
+`--metrics 127.0.0.1:2000` in its service's command line); keep that address on loopback or a
+private network.
 
 For the two build alerts, node_exporter reads the textfile collector folder that the `fxserver`
 role of the `luminare.gameserver` collection writes to (`fxserver_textfile_dir`), for example
 `--collector.textfile.directory=/var/lib/node_exporter/textfile_collector`. Without these jobs
-the host, build and database alerts stay silent; without the `server` label they fire without
-naming a game server, and the alerts of two hosts merge into one.
+the host, build and database alerts stay silent and the dashboard's host, MariaDB and tunnel
+panels show no data; without the `server` label the alerts fire without naming a game server, the
+alerts of two hosts merge into one, and the dashboard's `server` filter does not reach these
+panels.
+
+## Dashboard (`grafana/`)
+
+| File | Content |
+|---|---|
+| `grafana/dashboards/game-server-overview.json` | The dashboard "Game server overview" (uid `gso-game-server-overview`), for provisioning. |
+| `grafana/dashboards/shareable/game-server-overview.json` | The same dashboard without variables (uid `gso-game-server-overview-shared`), for importing; written by `python3 scripts/lint_dashboards.py --fix` ([ADR 0018](adr/0018-dashboard-with-a-shareable-copy.md)). |
+| `grafana/provisioning/dashboards/gameserver-observability.yml` | Loads the dashboards from `/var/lib/grafana/dashboards/gameserver-observability` into the Grafana folder "Game server". |
+| `grafana/provisioning/datasources/gameserver-observability.yml` | Optional: a Prometheus data source "Game server metrics" (uid `gso-prometheus`), for a Grafana that has none for the pack's metrics. |
+
+The dashboard has six rows: Overview (status, players, slots in use, `svMain` p95, build, build
+age, restarts, alerts), Tick time (heatmap of the `svMain` histogram, p95 and p99, ticks per
+second, mean), Players, Host, MariaDB, and Probes and tunnel. It has no row for the game server's
+resources (scripts and assets), because the pack does not collect the resource list
+([metrics reference](metrics.md#not-collected)); the host row shows the machine's CPU, memory, disk
+and network.
+
+Its variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `datasource` (Data source) | Grafana's default Prometheus data source | Any Prometheus data source with the pack's series. The file stores no data source, so every viewer gets their own default. |
+| `server` (Game server) | All | The values of the `server` label of `up{job="fxserver_perf"}`; one or several. Every panel filters on it. |
+
+Settings in the provisioning files:
+
+| Setting | Default | Description |
+|---|---|---|
+| `options.path` (dashboards) | `/var/lib/grafana/dashboards/gameserver-observability` | The folder Grafana reads the dashboard files from. Copy only `grafana/dashboards/*.json` there: Grafana also reads subfolders, and would then provision the shareable copy as a second dashboard. |
+| `folder`, `folderUid` (dashboards) | `Game server`, `gso-game-server` | The Grafana folder of the dashboard. |
+| `allowUiUpdates`, `disableDeletion` (dashboards) | `false`, `true` | The files are the source: changes made in Grafana cannot be saved over them, and a dashboard is not deleted from Grafana when its file goes missing. |
+| `updateIntervalSeconds` (dashboards) | `60` | How often Grafana reads the folder for changed files. |
+| `url` (data source) | `http://prometheus:9090` | Your Prometheus, as Grafana reaches it. |
+| `timeInterval` (data source) | `30s` | The scrape interval Grafana assumes for this data source. `$__rate_interval` is at least four times this value, so the rate panels use windows of 2 minutes or more, which hold two samples even of jobs scraped once a minute. |
+
+The file does not mark the data source as the default, so it never takes over from a default
+you have; Grafana makes it the default only when it is the first data source.
+
+To change the dashboard, edit `grafana/dashboards/game-server-overview.json` (for example by
+pasting the JSON model of a changed copy from Grafana, with `"id": null`, the same `uid` and the
+data source variable kept), then write the shareable copy and check both:
+
+```bash
+python3 scripts/lint_dashboards.py --fix
+python3 scripts/lint_dashboards.py --require-promtool
+```
+
+The check fails on platform or vendor marks in titles, a stored data source uid or variable
+selection, a metric that is not in the [metrics reference](metrics.md), a label that could identify
+a player, the `instance` label, an address or a link outside this repository, and a shareable
+copy that does not match ([ADR 0019](adr/0019-dashboard-check-in-standard-library-python.md)).
 
 ## json_exporter modules (`json_exporter/config.yml`)
 
@@ -209,6 +275,8 @@ settings and how often each path was requested.
 | `GITLEAKS_VERSION`, `GITLEAKS_SHA256` (variables in `scripts/test.sh`) | string | `8.30.1`, the sha256 of its linux-x64 tarball | The gitleaks download that `scripts/test.sh` makes in CI (`CI=true`), so the secret-rule tests run there. Keep them equal to the defaults in `reusable-gitleaks.yml` and to [toolchain.md](toolchain.md); a unit test compares them. |
 | `--allow-any-address` (`scripts/check_pack.py`) | flag | off | Accept any IP address instead of only loopback and the documentation ranges, for a copy of the configs with the addresses of your servers. CI never sets it. |
 | `--require-promtool` (`scripts/check_pack.py`) | flag | off | Fail when promtool is not on the `PATH`, instead of skipping `promtool check config`. The `promtool` job sets it. |
+| `--require-promtool` (`scripts/lint_dashboards.py`) | flag | off | Fail when promtool is not on the `PATH`, instead of skipping the parse of every panel query with `promtool check rules`. The `promtool` job sets it. |
+| `--fix` (`scripts/lint_dashboards.py`) | flag | off | Write the dashboards in the repository's JSON format and their shareable copies, then check them. |
 | `--bin-dir`, `--timeout` (`scripts/smoke_exporters.py`) | path, seconds | the `PATH`, `120` | Where the three binaries are, and how long to wait for each step: the first scrapes, the first evaluation of the rules, and each alert to go pending. |
 
 ## Secrets
