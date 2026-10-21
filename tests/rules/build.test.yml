@@ -1,0 +1,161 @@
+# promtool unit tests for FXServerArtifactOld and FXServerBuildBehindRecommended
+# (rules/build.alerts.yml).
+#   promtool test rules tests/rules/build.test.yml   (scripts/check_promtool.sh runs all)
+#
+# fxserver_artifact_installed_timestamp_seconds and fxserver_artifact_build carry the labels of a
+# node_exporter job with the server label of the game server
+# (docs/configuration.md#host-and-database-jobs). fxserver_recommended_build carries the labels of
+# the job fxserver_versions (prometheus/scrape/versions.yml), which has no server label.
+# promtool starts its clock at Unix time 0, so a build switched on 5,000,000 seconds (57.9 days)
+# before the start has the timestamp -5000000.
+#
+# The rules are evaluated every 15 minutes here, not every minute as in Prometheus, so that the
+# cases over 17 days stay fast; the 15-minute series below are sampled at exactly those times, so
+# every evaluation finds a sample of the build that runs.
+rule_files:
+  - ../../rules/build.alerts.yml
+
+evaluation_interval: 15m
+
+tests:
+  - name: a build switched on 57.9 days ago fires after an hour, and an update clears it
+    # game-01's build was switched on 5,000,000 s before the start, game-02's 10 days before.
+    # At 2h the age is 5,000,000 + 7,200 s = 57d 22h 53m 20s. At 2h30m game-01 runs a build
+    # switched on at 1h (its timestamp is 3600). One sample a minute, as node_exporter is scraped.
+    interval: 1m
+    input_series:
+      - series: 'fxserver_artifact_installed_timestamp_seconds{job="node", instance="127.0.0.1:9100", server="game-01"}'
+        values: '-5000000x149 3600x30'
+      - series: 'fxserver_artifact_build{job="node", instance="127.0.0.1:9100", server="game-01"}'
+        values: '35245x149 35246x30'
+      - series: >-
+          fxserver_artifact_installed_timestamp_seconds{job="node", instance="192.0.2.11:9100", server="game-02"}
+        values: '-864000x180'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: FXServerArtifactOld
+        exp_alerts: []
+      - eval_time: 2h
+        alertname: FXServerArtifactOld
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              server: game-01
+            exp_annotations:
+              summary: "The build of game server game-01 was switched on more than 8 weeks ago"
+              description: >-
+                The active build of game-01 was switched on 57d 22h 53m 20s ago. A Recommended
+                build loses support 6 weeks after the next one is released, and unsupported builds
+                older than 3 months cannot be joined from the server list.
+              runbook_url:
+                https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-fxserverartifactold
+      - eval_time: 2h30m
+        alertname: FXServerArtifactOld
+        exp_alerts: []
+
+  - name: a build switched on 46 days ago does not fire
+    interval: 1m
+    input_series:
+      - series: 'fxserver_artifact_installed_timestamp_seconds{job="node", instance="127.0.0.1:9100", server="game-01"}'
+        values: '-4000000x180'
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: FXServerArtifactOld
+        exp_alerts: []
+
+  - name: 14 days behind a newer Recommended build fires, an update clears it
+    # One sample every 15 minutes (the job fxserver_versions scrapes every 4). The version list
+    # names 35245 up to 72 h (sample 288) and 35300 from 72h15m on. game-01 runs 35245 and updates to
+    # 35300 at 420 h (sample 1680); game-02 runs 37692, a newer build than the Recommended one.
+    # The 14-day window (336 h) holds no 35245 any more from 408 h on, so the alert is pending
+    # from 408 h and fires from 409 h.
+    interval: 15m
+    input_series:
+      - series: 'fxserver_artifact_build{job="node", instance="127.0.0.1:9100", server="game-01"}'
+        values: '35245x1679 35300x240'
+      - series: 'fxserver_artifact_build{job="node", instance="192.0.2.11:9100", server="game-02"}'
+        values: '37692x1920'
+      - series: >-
+          fxserver_recommended_build{job="fxserver_versions",
+          instance="https://changelogs-live.fivem.net/api/changelog/versions/linux/server", module="fxserver_versions"}
+        values: '35245x288 35300x1628'
+    alert_rule_test:
+      # 35300 has been the Recommended build for 13.6 days: not yet.
+      - eval_time: 400h
+        alertname: FXServerBuildBehindRecommended
+        exp_alerts: []
+      - eval_time: 408h30m
+        alertname: FXServerBuildBehindRecommended
+        exp_alerts: []
+      - eval_time: 410h
+        alertname: FXServerBuildBehindRecommended
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              server: game-01
+            exp_annotations:
+              summary: "Game server game-01 runs a build older than the Recommended build"
+              description: >-
+                game-01 runs build 35245, and every Recommended build that the version list has
+                named in the last 14 days is newer. The build loses support some weeks after a
+                newer Recommended build is released.
+              runbook_url:
+                https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-fxserverbuildbehindrecommended
+      - eval_time: 425h
+        alertname: FXServerBuildBehindRecommended
+        exp_alerts: []
+
+  - name: an outage of the version list does not end the alert
+    # The version list is read up to 372h15m (sample 1489) and not at all afterwards (for example
+    # because the host lost outbound access); the samples of the last 14 days still say 35300.
+    interval: 15m
+    input_series:
+      - series: 'fxserver_artifact_build{job="node", instance="127.0.0.1:9100", server="game-01"}'
+        values: '35245x1920'
+      - series: >-
+          fxserver_recommended_build{job="fxserver_versions",
+          instance="https://changelogs-live.fivem.net/api/changelog/versions/linux/server", module="fxserver_versions"}
+        values: '35245x288 35300x1200'
+    alert_rule_test:
+      - eval_time: 380h
+        alertname: FXServerBuildBehindRecommended
+        exp_alerts: []
+      - eval_time: 420h
+        alertname: FXServerBuildBehindRecommended
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              server: game-01
+            exp_annotations:
+              summary: "Game server game-01 runs a build older than the Recommended build"
+              description: >-
+                game-01 runs build 35245, and every Recommended build that the version list has
+                named in the last 14 days is newer. The build loses support some weeks after a
+                newer Recommended build is released.
+              runbook_url:
+                https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-fxserverbuildbehindrecommended
+
+  - name: running the Recommended build does not fire
+    interval: 15m
+    input_series:
+      - series: 'fxserver_artifact_build{job="node", instance="127.0.0.1:9100", server="game-01"}'
+        values: '35245x1600'
+      - series: >-
+          fxserver_recommended_build{job="fxserver_versions",
+          instance="https://changelogs-live.fivem.net/api/changelog/versions/linux/server", module="fxserver_versions"}
+        values: '35245x1600'
+    alert_rule_test:
+      - eval_time: 390h
+        alertname: FXServerBuildBehindRecommended
+        exp_alerts: []
+
+  - name: without the version list an old build does not fire
+    # The job fxserver_versions is optional: without it there is nothing to compare with.
+    interval: 15m
+    input_series:
+      - series: 'fxserver_artifact_build{job="node", instance="192.0.2.11:9100", server="game-02"}'
+        values: '30000x1600'
+    alert_rule_test:
+      - eval_time: 390h
+        alertname: FXServerBuildBehindRecommended
+        exp_alerts: []

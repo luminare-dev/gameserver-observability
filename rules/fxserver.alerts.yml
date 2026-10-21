@@ -1,0 +1,153 @@
+# Alerting rules for the game server (FXServer), built on the jobs of prometheus/scrape/ (job,
+# module and server labels as set there) and on the recording rules in fxserver.recording.yml.
+# Load every file of rules/ together:
+#   rule_files: [/etc/prometheus/rules/*.yml]
+#
+# Every alert carries the labels server and severity (critical: act now, the server or its
+# database is down for players or the admin interface is open; warning: act within the day),
+# never instance, which can hold a host address
+# (docs/adr/0013-probed-target-in-the-instance-label.md). Every alert has the annotations
+# summary, description and runbook_url; docs/runbook.md has one section per alert, and
+# tests/rules/*.test.yml test each alert where it fires and where it must not
+# (docs/adr/0015-alerts-per-game-server.md).
+groups:
+  - name: fxserver-alerts
+    interval: 30s
+    rules:
+      # Server down: the game port refuses TCP connections, or info.json does not answer with
+      # 200. Read from the probes, so that a wrong /perf/ password is not reported as an outage.
+      - alert: FXServerDown
+        expr: >-
+          min by (server) (probe_success{job="fxserver_blackbox", module=~"tcp_connect|http_fxserver_info"})
+          == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Game server {{ $labels.server }} is down"
+          description: >-
+            For 2 minutes the game port of {{ $labels.server }} has refused TCP connections, or
+            info.json has not answered with 200. Players cannot join, and connected players have
+            lost the server.
+          runbook_url:
+            https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-fxserverdown
+
+      # A job of the pack cannot scrape a target of a server that the probes do not report as
+      # down: a wrong /perf/ password, a refused JSON request or a stopped exporter. Its series
+      # are missing, so other alerts for that server may stay silent.
+      - alert: FXServerTargetDown
+        expr: >-
+          (min by (server, job) (up{job=~"fxserver_perf|fxserver_json|fxserver_blackbox|fxserver_tunnel"}) == 0)
+          unless on (server)
+          (min by (server) (probe_success{job="fxserver_blackbox", module=~"tcp_connect|http_fxserver_info"}) == 0)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Job {{ $labels.job }} cannot scrape game server {{ $labels.server }}"
+          description: >-
+            For 10 minutes Prometheus has not been able to scrape at least one target of the job
+            {{ $labels.job }} for {{ $labels.server }}, while the probes do not report the server
+            as down. The series of that target are missing, so other alerts for this server may
+            not fire.
+          runbook_url:
+            https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-fxservertargetdown
+
+      # svMain p95 above 50 ms for 5 minutes: more than 5 % of the main thread's ticks took longer
+      # than its 50 ms timer interval, in every one-minute window for 5 minutes. 0.05 is a bucket
+      # bound of the histogram, so the percentile is exact at the threshold.
+      - alert: FXServerTickTimeHigh
+        expr: server_thread:fxserver_tick_time_seconds:p95_1m{thread="svMain"} > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Main thread ticks are slow on game server {{ $labels.server }}"
+          description: >-
+            For 5 minutes more than 5 % of the svMain ticks on {{ $labels.server }} have taken
+            longer than 50 ms (95th percentile over the last minute:
+            {{ $value | humanizeDuration }}). Scripts and events run late, and players notice lag.
+          runbook_url:
+            https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-fxserverticktimehigh
+
+      # 0 players 30 minutes after a restart: no player now and in the last 30 minutes, a restart
+      # 30 to 60 minutes ago (a reset of the svMain tick counter), and players in the 30 minutes
+      # before that, so that a server that was empty before its restart does not fire. Active
+      # from 30 until at most 60 minutes after the restart
+      # (docs/adr/0016-restarts-from-tick-counter-resets.md).
+      - alert: FXServerNoPlayersAfterRestart
+        expr: >-
+          (
+            max by (server) (max_over_time(fxserver_clients[30m])) == 0
+            and on (server)
+            max by (server) (fxserver_clients) == 0
+          )
+          and on (server)
+          (sum by (server) (resets(fxserver_tick_time_seconds_count{thread="svMain"}[1h])) > 0)
+          unless on (server)
+          (sum by (server) (resets(fxserver_tick_time_seconds_count{thread="svMain"}[30m])) > 0)
+          and on (server)
+          (max by (server) (max_over_time(fxserver_clients[30m] offset 30m)) > 0)
+        labels:
+          severity: warning
+        annotations:
+          summary: "No players on game server {{ $labels.server }} since its restart"
+          description: >-
+            {{ $labels.server }} restarted 30 to 60 minutes ago and has had no player for the last
+            30 minutes, although players were online in the 30 minutes before. Players may not find
+            the server in the server list, or may not be able to join it.
+          runbook_url:
+            https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-fxservernoplayersafterrestart
+
+      # /perf/ answers a request without credentials with 2xx instead of 401. Read from the status
+      # code, not from probe_success, so that a server that is down does not fire this alert too.
+      - alert: FXServerPerfEndpointExposed
+        expr: >-
+          max by (server) (probe_http_status_code{job="fxserver_blackbox", module="http_401_expected"} >= 200 < 300)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Game server {{ $labels.server }} serves /perf/ without credentials"
+          description: >-
+            For 5 minutes /perf/ on {{ $labels.server }} has answered a request without credentials
+            with HTTP {{ $value }} instead of 401. Anyone who reaches the game port can read the
+            server's tick times.
+          runbook_url:
+            https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-fxserverperfendpointexposed
+
+      # Only with the optional job fxserver_tunnel (prometheus/scrape/tunnel.yml): the admin
+      # hostname answers a request without a login with 2xx, so its access protection is gone.
+      - alert: FXServerAdminHostnameUnprotected
+        expr: >-
+          max by (server) (probe_http_status_code{job="fxserver_tunnel", module="http_access_protected"} >= 200 < 300)
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The admin hostname of game server {{ $labels.server }} answers without a login"
+          description: >-
+            For 5 minutes the admin hostname of {{ $labels.server }} has answered a request without
+            a login with HTTP {{ $value }} instead of a redirect to the login page or a refusal.
+            The access protection in front of the admin interface is missing.
+          runbook_url:
+            https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-fxserveradminhostnameunprotected
+
+      # The admin hostname probe fails for another reason: no answer, a TLS error, plain HTTP or
+      # an unexpected status such as 502 from the tunnel.
+      - alert: FXServerAdminHostnameProbeFailing
+        expr: >-
+          (min by (server) (probe_success{job="fxserver_tunnel", module="http_access_protected"}) == 0)
+          unless on (server)
+          (max by (server) (probe_http_status_code{job="fxserver_tunnel", module="http_access_protected"} >= 200 < 300))
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The admin hostname probe of game server {{ $labels.server }} fails"
+          description: >-
+            For 10 minutes the admin hostname of {{ $labels.server }} has not answered over HTTPS
+            with a redirect to the login page or a refusal (302, 303 or 403). The tunnel, the
+            hostname or its certificate may be broken, so admins cannot reach the admin interface.
+          runbook_url:
+            https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-fxserveradminhostnameprobefailing

@@ -1,0 +1,55 @@
+# Alerting rules for the game server build: how long ago the active build was switched on, and
+# whether it is older than the platform's Recommended build. They read two textfile metrics that
+# the fxserver role of the luminare.gameserver collection writes for node_exporter
+# (fxserver_textfile_dir), and for FXServerBuildBehindRecommended also the optional job
+# fxserver_versions (prometheus/scrape/versions.yml). This pack ships no node_exporter job: scrape
+# node_exporter on the game server's host with a job of your own and give it the same server
+# label as the pack's jobs (docs/configuration.md#host-and-database-jobs).
+# Load every file of rules/ together, or leave this one out if the host has no build metrics:
+#   rule_files: [/etc/prometheus/rules/*.yml]
+#
+# Every alert carries the labels server and severity and the annotations summary, description
+# and runbook_url (docs/adr/0015-alerts-per-game-server.md); docs/runbook.md has one section per
+# alert, tests/rules/build.test.yml tests each one, and
+# docs/adr/0017-build-age-and-the-recommended-build.md explains both sources.
+groups:
+  - name: fxserver-build-alerts
+    interval: 1m
+    rules:
+      # The active build was switched on more than 8 weeks (56 days) ago. The switch time is a
+      # lower bound of the build's age: a build that was already old when it was switched on
+      # fires later.
+      - alert: FXServerArtifactOld
+        expr: time() - max by (server) (fxserver_artifact_installed_timestamp_seconds) > 56 * 86400
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "The build of game server {{ $labels.server }} was switched on more than 8 weeks ago"
+          description: >-
+            The active build of {{ $labels.server }} was switched on {{ $value | humanizeDuration }}
+            ago. A Recommended build loses support 6 weeks after the next one is released, and
+            unsupported builds older than 3 months cannot be joined from the server list.
+          runbook_url:
+            https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-fxserverartifactold
+
+      # The active build is older than every Recommended build that the version list named in the
+      # last 14 days: a newer Recommended build has been out for 14 days, or for as long as the
+      # version list has been read if that is shorter. min_over_time keeps working through an
+      # outage of the version list, because it reads the samples of the whole 14 days.
+      - alert: FXServerBuildBehindRecommended
+        expr: >-
+          max by (server) (fxserver_artifact_build)
+          < on () group_left ()
+          min(min_over_time(fxserver_recommended_build[14d]))
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Game server {{ $labels.server }} runs a build older than the Recommended build"
+          description: >-
+            {{ $labels.server }} runs build {{ $value }}, and every Recommended build that the
+            version list has named in the last 14 days is newer. The build loses support some
+            weeks after a newer Recommended build is released.
+          runbook_url:
+            https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-fxserverbuildbehindrecommended

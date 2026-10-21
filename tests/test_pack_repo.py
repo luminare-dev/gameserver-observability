@@ -9,10 +9,11 @@
 - CI and the release build run the same test command; the promtool, Prometheus, exporter and
   gitleaks pins match docs/toolchain.md and the secret-scan workflow; the promtool job runs the
   pack check and the exporters job the end-to-end run.
-- Every metric the scrape config and the json_exporter modules produce, every job and every probe
-  module is in docs/metrics.md, and scripts/smoke_exporters.py expects exactly those metrics.
-- docs/cardinality.md: the sample limits and target counts in its tables are those of the scrape
-  configs, and its sums add up.
+- Every metric the scrape configs and the json_exporter modules produce, and every job and probe
+  module of every scrape file, is in docs/metrics.md; scripts/smoke_exporters.py expects exactly
+  those metrics and runs every scrape file except the optional tunnel probe.
+- docs/cardinality.md: the sample limits, target counts and recorded series in its tables are
+  those of the scrape configs and the recording rules, and its sums add up.
 - The scrape job's build rule finds the build number in both likely shapes of the version string.
 - promtool: every rule file is named in the rule_files of at least one rule test.
 - gitleaks: the license-key rules (the same as in the luminare.gameserver collection) find keys
@@ -68,6 +69,7 @@ PACK_PATHS = [
     "docs/metrics.md",
 ]
 CONVENTIONAL_PREFIXES = {"build", "ci", "chore", "test"}
+SCRAPE_FILES = ("prometheus/scrape/fxserver.yml", "prometheus/scrape/tunnel.yml", "prometheus/scrape/versions.yml")
 RULE_FILE_GLOBS = ("rules/*.yml", "rules/*.yaml")  # the same globs as scripts/check_promtool.sh
 RULE_TEST_GLOBS = ("tests/rules/*.test.yml", "tests/rules/*.test.yaml")
 ANY_SHAPE_RULE = "cfx-license-key-any-shape"
@@ -291,13 +293,13 @@ class PackDocsTest(unittest.TestCase):
 
     def test_every_exported_metric_is_documented(self):
         names = exported_metrics()
-        self.assertEqual(len(names), 7, names)
+        self.assertEqual(len(names), 8, names)
         for name in sorted(names):
             with self.subTest(metric=name):
                 self.assertIn(f"`{name}`", self.metrics_doc)
 
     def test_every_job_and_probe_module_is_documented(self):
-        for rel in ("prometheus/scrape/fxserver.yml", "prometheus/scrape/tunnel.yml"):
+        for rel in SCRAPE_FILES:
             for job in check_pack.load_yaml((ROOT / rel).read_text(encoding="utf-8"))["scrape_configs"]:
                 with self.subTest(job=job["job_name"]):
                     self.assertIn(f"`{job['job_name']}`", self.metrics_doc)
@@ -306,11 +308,31 @@ class PackDocsTest(unittest.TestCase):
             with self.subTest(module=module):
                 self.assertIn(f"`{module}`", self.metrics_doc)
 
+    def test_every_scrape_file_is_documented(self):
+        on_disk = sorted(p.relative_to(ROOT).as_posix() for p in (ROOT / "prometheus" / "scrape").glob("*.y*ml"))
+        self.assertEqual(on_disk, sorted(SCRAPE_FILES))
+
     def test_the_end_to_end_run_expects_exactly_these_metrics(self):
         self.assertEqual(smoke_exporters.EXPECTED_METRICS, exported_metrics())
 
+    def test_the_end_to_end_run_uses_every_scrape_file_but_the_tunnel_probe(self):
+        used = {smoke_exporters.SCRAPE_CONFIG, smoke_exporters.VERSIONS_CONFIG}
+        self.assertEqual(sorted(p.relative_to(ROOT).as_posix() for p in used),
+                         sorted(set(SCRAPE_FILES) - {"prometheus/scrape/tunnel.yml"}))
+        self.assertEqual(smoke_exporters.EXPECTED_TARGETS,
+                         sum(targets_of(job) for p in used for job in scrape_jobs(p.relative_to(ROOT).as_posix())))
+
 
 PROMETHEUS_SERIES_PER_TARGET = 5  # up, scrape_duration_seconds, scrape_samples_*, scrape_series_added
+
+
+# Recorded series, each one per server and thread (rules/fxserver.recording.yml).
+RECORDED_PER_THREAD = (
+    "server_thread:fxserver_tick_time_seconds:p95_1m",
+    "server_thread:fxserver_tick_time_seconds:p99_1m",
+    "server_thread:fxserver_tick_time_seconds:mean1m",
+    "server_thread:fxserver_tick_time_seconds_count:rate1m",
+)
 
 
 def scrape_jobs(rel: str) -> list[dict]:
@@ -354,7 +376,7 @@ class CardinalityDocTest(unittest.TestCase):
                 self.assertEqual(number(own), PROMETHEUS_SERIES_PER_TARGET)
                 self.assertLessEqual(number(samples), job["sample_limit"])
         self.assertEqual(targets_per_job, {name: targets_of(job) for name, job in self.jobs.items()})
-        self.assertEqual(number(total[0]), smoke_exporters.EXPECTED_TARGETS)
+        self.assertEqual(number(total[0]), smoke_exporters.DEFAULT_JOB_TARGETS)
         self.assertEqual(number(total[1]), sum(number(row[1]) for row in rows))
         self.assertEqual(number(total[2]), PROMETHEUS_SERIES_PER_TARGET * len(rows))
         self.assertIn(f"costs **{number(total[1]) + number(total[2])} series**", self.doc)
@@ -363,16 +385,28 @@ class CardinalityDocTest(unittest.TestCase):
         rows = {row[0]: row[1] for row in markdown_table(self.doc, "## The whole budget per server")}
         default_jobs = series_limit("prometheus/scrape/fxserver.yml")
         tunnel = series_limit("prometheus/scrape/tunnel.yml")
+        versions = series_limit("prometheus/scrape/versions.yml")
+        recorded = len(RECORDED_PER_THREAD) * len(smoke_exporters.THREADS)
         self.assertIn(f"at most {default_jobs} by the sample limits", rows["This pack, default jobs"])
         self.assertEqual(rows["This pack, tunnel probe"], f"at most {tunnel}")
+        self.assertEqual(rows["This pack, version list"], f"at most {versions}, once per Prometheus")
+        self.assertEqual(number(rows["This pack, recording rules"]), recorded)
         reserves = sum(number(series) for part, series in rows.items() if part.startswith("Reserve:"))
-        self.assertEqual(rows["**Total**"], f"**at most {default_jobs + tunnel + reserves:,}**")
-        self.assertLessEqual(default_jobs + tunnel + reserves, 2000)
+        total = default_jobs + tunnel + versions + recorded + reserves
+        self.assertEqual(rows["**Total**"], f"**at most {total:,}**")
+        self.assertLessEqual(total, 2000)
         measured = number(rows["This pack, default jobs"])
-        free = 2000 - measured - reserves
-        self.assertIn(f"limit of {default_jobs}, and without the tunnel probe, {free:,} of the 2,000", " ".join(
-            self.doc.split()))
-        self.assertIn(f"({free - tunnel:,} with the tunnel probe at its limit)", self.doc)
+        free = 2000 - measured - recorded - reserves
+        text = " ".join(self.doc.split())
+        self.assertIn(f"limit of {default_jobs}, and without the optional jobs, {free:,} of the 2,000", text)
+        self.assertIn(f"({free - tunnel - versions:,} with the tunnel probe and the version list at their limits)",
+                      text)
+
+    def test_the_recording_rules_are_the_ones_counted(self):
+        text = (ROOT / "rules" / "fxserver.recording.yml").read_text(encoding="utf-8")
+        recorded = set(re.findall(r"^\s*- record: (\S+)$", text, re.M))
+        self.assertEqual(recorded, set(RECORDED_PER_THREAD))
+        self.assertEqual(set(smoke_exporters.RECORDED), set(RECORDED_PER_THREAD))
 
 
 class BuildLabelTest(unittest.TestCase):

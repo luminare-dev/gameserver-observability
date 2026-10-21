@@ -1,0 +1,28 @@
+# Optional scrape job: the build number of the platform's current Recommended server build, read
+# from its public version list through json_exporter. The alert FXServerBuildBehindRecommended
+# (rules/build.alerts.yml) compares it with the build each game server runs. The version list is
+# the same for every game server, so include this file once per Prometheus:
+#   scrape_config_files: [/etc/prometheus/scrape/fxserver.yml, /etc/prometheus/scrape/versions.yml]
+# Uses json_exporter on 127.0.0.1:7979 with json_exporter/config.yml; json_exporter needs
+# outbound HTTPS to the version list. The series have no server label.
+scrape_configs:
+  - job_name: fxserver_versions
+    # The Recommended build changes every few weeks, so one request every 4 minutes is plenty:
+    # the longest interval in whole minutes that stays below Prometheus' 5-minute lookback, so
+    # the series does not go stale between scrapes (promtool's lint refuses 5 minutes or more).
+    scrape_interval: 4m
+    metrics_path: /probe
+    sample_limit: 10
+    static_configs:
+      - targets: ["https://changelogs-live.fivem.net/api/changelog/versions/linux/server"]
+        labels:
+          module: fxserver_versions
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [module]
+        target_label: __param_module
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 127.0.0.1:7979

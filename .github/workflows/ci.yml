@@ -1,9 +1,11 @@
 # Caller: lint, tests and the full-history secret scan on every pull request and push to main.
 # Required checks for the main ruleset: "ci / lint-test" and "secrets / gitleaks".
-# The "promtool" job checks the pack's Prometheus rules (scripts/check_promtool.sh) and its
-# scrape and exporter configs (scripts/check_pack.py, with promtool check config). The
-# "exporters" job scrapes the fake game server through Prometheus, json_exporter and
-# blackbox_exporter with the pack's configs (scripts/smoke_exporters.py).
+# The "promtool" job checks and tests the pack's Prometheus rules (scripts/check_promtool.sh:
+# promtool check rules and promtool test rules) and checks its scrape and exporter configs
+# (scripts/check_pack.py, with promtool check config). The "exporters" job scrapes the fake game
+# server through Prometheus, json_exporter and blackbox_exporter with the pack's configs and
+# rules, and checks that a tick-time spike and a stopped server raise the right alerts
+# (scripts/smoke_exporters.py).
 name: ci
 
 on:
@@ -71,7 +73,8 @@ jobs:
   exporters:
     name: exporters
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # The run takes about 3 minutes; each of its six waits gives up after 2 minutes.
+    timeout-minutes: 20
     permissions:
       contents: read
     env:
@@ -110,5 +113,5 @@ jobs:
             https://github.com/prometheus/blackbox_exporter/releases/download
           echo "$bin" >> "$GITHUB_PATH"
 
-      - name: Scrape the fake game server through the exporters
+      - name: Scrape the fake game server through the exporters and evaluate the rules
         run: python3 scripts/smoke_exporters.py

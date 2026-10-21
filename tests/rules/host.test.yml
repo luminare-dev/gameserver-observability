@@ -1,0 +1,118 @@
+# promtool unit tests for HostDiskAlmostFull (rules/host.alerts.yml).
+#   promtool test rules tests/rules/host.test.yml   (scripts/check_promtool.sh runs all)
+#
+# The series carry the labels of a node_exporter job with the server label of the game server
+# (docs/configuration.md#host-and-database-jobs).
+rule_files:
+  - ../../rules/host.alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: the root filesystem at 90 % fires after 10 minutes; tmpfs and read-only filesystems never do
+    # / goes from 80 % to 90 % used at minute 6. /run (tmpfs), a squashfs image and a read-only
+    # /boot are full the whole time. game-02's / is half full.
+    interval: 1m
+    input_series:
+      - series: >-
+          node_filesystem_size_bytes{job="node", instance="127.0.0.1:9100", server="game-01", device="/dev/sda1",
+          fstype="ext4", mountpoint="/"}
+        values: '100000000000x30'
+      - series: >-
+          node_filesystem_avail_bytes{job="node", instance="127.0.0.1:9100", server="game-01", device="/dev/sda1",
+          fstype="ext4", mountpoint="/"}
+        values: '20000000000x5 10000000000x25'
+      - series: >-
+          node_filesystem_readonly{job="node", instance="127.0.0.1:9100", server="game-01", device="/dev/sda1",
+          fstype="ext4", mountpoint="/"}
+        values: '0x30'
+      - series: >-
+          node_filesystem_size_bytes{job="node", instance="127.0.0.1:9100", server="game-01", device="tmpfs",
+          fstype="tmpfs", mountpoint="/run"}
+        values: '400000000x30'
+      - series: >-
+          node_filesystem_avail_bytes{job="node", instance="127.0.0.1:9100", server="game-01", device="tmpfs",
+          fstype="tmpfs", mountpoint="/run"}
+        values: '0x30'
+      - series: >-
+          node_filesystem_readonly{job="node", instance="127.0.0.1:9100", server="game-01", device="tmpfs",
+          fstype="tmpfs", mountpoint="/run"}
+        values: '0x30'
+      - series: >-
+          node_filesystem_size_bytes{job="node", instance="127.0.0.1:9100", server="game-01", device="/dev/loop0",
+          fstype="squashfs", mountpoint="/snap/core"}
+        values: '50000000x30'
+      - series: >-
+          node_filesystem_avail_bytes{job="node", instance="127.0.0.1:9100", server="game-01", device="/dev/loop0",
+          fstype="squashfs", mountpoint="/snap/core"}
+        values: '0x30'
+      - series: >-
+          node_filesystem_readonly{job="node", instance="127.0.0.1:9100", server="game-01", device="/dev/loop0",
+          fstype="squashfs", mountpoint="/snap/core"}
+        values: '1x30'
+      - series: >-
+          node_filesystem_size_bytes{job="node", instance="127.0.0.1:9100", server="game-01", device="/dev/sda2",
+          fstype="ext4", mountpoint="/boot"}
+        values: '1000000000x30'
+      - series: >-
+          node_filesystem_avail_bytes{job="node", instance="127.0.0.1:9100", server="game-01", device="/dev/sda2",
+          fstype="ext4", mountpoint="/boot"}
+        values: '0x30'
+      - series: >-
+          node_filesystem_readonly{job="node", instance="127.0.0.1:9100", server="game-01", device="/dev/sda2",
+          fstype="ext4", mountpoint="/boot"}
+        values: '1x30'
+      - series: >-
+          node_filesystem_size_bytes{job="node", instance="192.0.2.11:9100", server="game-02", device="/dev/vda1",
+          fstype="ext4", mountpoint="/"}
+        values: '40000000000x30'
+      - series: >-
+          node_filesystem_avail_bytes{job="node", instance="192.0.2.11:9100", server="game-02", device="/dev/vda1",
+          fstype="ext4", mountpoint="/"}
+        values: '20000000000x30'
+      - series: >-
+          node_filesystem_readonly{job="node", instance="192.0.2.11:9100", server="game-02", device="/dev/vda1",
+          fstype="ext4", mountpoint="/"}
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: HostDiskAlmostFull
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: HostDiskAlmostFull
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: HostDiskAlmostFull
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              server: game-01
+              mountpoint: /
+            exp_annotations:
+              summary: "Disk / on game server game-01 is 90% full"
+              description: >-
+                For 10 minutes less than 15 % of the filesystem at / on game-01 has been available.
+                When it is full, the game server cannot write its logs or save data, the database
+                stops writing, and backups and build updates fail.
+              runbook_url:
+                https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-hostdiskalmostfull
+
+  - name: a filesystem at 84 % does not fire
+    interval: 1m
+    input_series:
+      - series: >-
+          node_filesystem_size_bytes{job="node", instance="127.0.0.1:9100", server="game-01", device="/dev/sda1",
+          fstype="ext4", mountpoint="/"}
+        values: '100000000000x30'
+      - series: >-
+          node_filesystem_avail_bytes{job="node", instance="127.0.0.1:9100", server="game-01", device="/dev/sda1",
+          fstype="ext4", mountpoint="/"}
+        values: '16000000000x30'
+      - series: >-
+          node_filesystem_readonly{job="node", instance="127.0.0.1:9100", server="game-01", device="/dev/sda1",
+          fstype="ext4", mountpoint="/"}
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: HostDiskAlmostFull
+        exp_alerts: []

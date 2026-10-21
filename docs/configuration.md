@@ -1,8 +1,9 @@
 # Configuration
 
 The pack is configuration: the scrape jobs in `prometheus/scrape/`, the json_exporter modules in
-`json_exporter/config.yml` and the blackbox_exporter modules in `blackbox/blackbox.yml`. Change
-the values below for your servers, then run `python3 scripts/check_pack.py` (with promtool on the
+`json_exporter/config.yml`, the blackbox_exporter modules in `blackbox/blackbox.yml` and the
+recording and alerting rules in `rules/`. Change the values below for your servers, then run
+`python3 scripts/check_pack.py` and `bash scripts/check_promtool.sh` (with promtool on the
 `PATH`) before you load them. [Metrics reference](metrics.md) describes what each job collects.
 
 The pack check accepts only loopback and documentation addresses (`192.0.2.0/24`,
@@ -69,14 +70,49 @@ Optional. Set the target to the HTTPS address of your access-protected admin hos
 example `https://demo-tx.example.com/`) and keep the `server` label of the game server. The probe
 succeeds when a request without a login is redirected (`302`, `303`) or refused (`403`).
 
+### The version list (`prometheus/scrape/versions.yml`)
+
+Optional, once per Prometheus. It needs no change: the target is the platform's public version
+list, which json_exporter fetches over HTTPS every 4 minutes, so the Prometheus host needs
+outbound HTTPS. A shorter interval brings no benefit; a longer one lets the series go stale
+between scrapes. Without this job, `FXServerBuildBehindRecommended` never fires; the other alerts
+do not need it.
+
+### Host and database jobs
+
+Some alerts read node_exporter and mysqld_exporter ([metrics reference](metrics.md#series-the-rules-read-from-other-exporters)).
+This pack ships no jobs for them, because most setups scrape these exporters already. Give each of
+their targets the `server` label of the game server it belongs to, so that the alerts name it:
+
+```yaml
+scrape_configs:
+  - job_name: node
+    static_configs:
+      - targets: ["127.0.0.1:9100"]
+        labels:
+          server: game-01
+  - job_name: mysqld
+    static_configs:
+      - targets: ["127.0.0.1:9104"]
+        labels:
+          server: game-01
+```
+
+For the two build alerts, node_exporter reads the textfile collector folder that the `fxserver`
+role of the `luminare.gameserver` collection writes to (`fxserver_textfile_dir`), for example
+`--collector.textfile.directory=/var/lib/node_exporter/textfile_collector`. Without these jobs
+the host, build and database alerts stay silent; without the `server` label they fire without
+naming a game server, and the alerts of two hosts merge into one.
+
 ## json_exporter modules (`json_exporter/config.yml`)
 
 | Module | Fetches | Metrics |
 |---|---|---|
 | `fxserver_dynamic` | `dynamic.json` | `fxserver_clients`, `fxserver_max_clients` |
 | `fxserver_info` | `info.json` | `fxserver_info` (labels `version`, and `build` from the scrape job), `fxserver_onesync_enabled` |
+| `fxserver_versions` | the platform's version list (job `fxserver_versions`) | `fxserver_recommended_build` |
 
-Both modules do not follow redirects. json_exporter ignores keys it does not know, so a typo
+The modules do not follow redirects. json_exporter ignores keys it does not know, so a typo
 would silently drop a metric; `scripts/check_pack.py` reports unknown keys. Start json_exporter
 with `--config.file=/etc/json_exporter/config.yml --web.listen-address=127.0.0.1:7979`.
 
@@ -92,6 +128,44 @@ with `--config.file=/etc/json_exporter/config.yml --web.listen-address=127.0.0.1
 Start blackbox_exporter with `--config.file=/etc/blackbox_exporter/blackbox.yml
 --web.listen-address=127.0.0.1:9115`. Both exporters fetch any URL that Prometheus (or anyone
 else who reaches them) asks for, so they listen on loopback or a private address only.
+
+## Rules (`rules/`)
+
+Load all rule files with `rule_files: [/etc/prometheus/rules/*.yml]`, or leave out the files whose
+data you do not collect. Every alert has the labels `server` and `severity` and the annotations
+`summary`, `description` and `runbook_url` (a section of the [runbook](runbook.md))
+([ADR 0015](adr/0015-alerts-per-game-server.md)).
+
+| File | Rules | Needs |
+|---|---|---|
+| `fxserver.recording.yml` | the [recorded tick-time series](metrics.md#recorded-series-rulesfxserverrecordingyml) | job `fxserver_perf` |
+| `fxserver.alerts.yml` | the game server alerts | the jobs in `prometheus/scrape/fxserver.yml` (and `tunnel.yml` for the admin hostname alerts), the recorded series |
+| `build.alerts.yml` | the build alerts | node_exporter with the build textfile, and the job `fxserver_versions` for `FXServerBuildBehindRecommended` |
+| `host.alerts.yml` | the disk alert | node_exporter |
+| `mariadb.alerts.yml` | the database alerts | mysqld_exporter |
+
+The thresholds:
+
+| Alert | File | Fires when | For | Severity |
+|---|---|---|---|---|
+| `FXServerDown` | `fxserver.alerts.yml` | the probe `tcp_connect` or `http_fxserver_info` fails | 2 min | critical |
+| `FXServerTargetDown` | `fxserver.alerts.yml` | a target of `fxserver_perf`, `fxserver_json`, `fxserver_blackbox` or `fxserver_tunnel` cannot be scraped while the probes do not report the server as down | 10 min | warning |
+| `FXServerTickTimeHigh` | `fxserver.alerts.yml` | the `svMain` tick time's 95th percentile over a minute is above 50 ms | 5 min | warning |
+| `FXServerNoPlayersAfterRestart` | `fxserver.alerts.yml` | 0 players for 30 minutes after a restart 30 to 60 minutes ago, with players in the 30 minutes before ([ADR 0016](adr/0016-restarts-from-tick-counter-resets.md)) | none | warning |
+| `FXServerPerfEndpointExposed` | `fxserver.alerts.yml` | `/perf/` answers a request without credentials with `2xx` | 5 min | warning |
+| `FXServerAdminHostnameUnprotected` | `fxserver.alerts.yml` | the admin hostname answers a request without a login with `2xx` | 5 min | critical |
+| `FXServerAdminHostnameProbeFailing` | `fxserver.alerts.yml` | the admin hostname probe fails for another reason | 10 min | warning |
+| `FXServerArtifactOld` | `build.alerts.yml` | the active build was switched on more than 56 days (8 weeks) ago | 1 h | warning |
+| `FXServerBuildBehindRecommended` | `build.alerts.yml` | the active build is older than every Recommended build of the last 14 days ([ADR 0017](adr/0017-build-age-and-the-recommended-build.md)) | 1 h | warning |
+| `HostDiskAlmostFull` | `host.alerts.yml` | a writable filesystem is more than 85 % full (less than 15 % available) | 10 min | warning |
+| `MariaDBDown` | `mariadb.alerts.yml` | `mysql_up` is 0 | 2 min | critical |
+| `MariaDBSlowQueries` | `mariadb.alerts.yml` | more than 1 slow query a minute, averaged over 5 minutes | 10 min | warning |
+
+To change a threshold, edit the number in the alert's `expr` (or its `for`) in your copy, and in
+this repository change the expected alerts in `tests/rules/` and the alert's runbook section with
+it; `bash scripts/check_promtool.sh` must pass. The rule groups are evaluated every 30 seconds
+(`fxserver-tick-time`, `fxserver-alerts`) or every minute (the others), whatever
+`evaluation_interval` the Prometheus config sets.
 
 ## Fake game server (`demo/fake-fxserver/fake_fxserver.py`)
 
@@ -135,7 +209,7 @@ settings and how often each path was requested.
 | `GITLEAKS_VERSION`, `GITLEAKS_SHA256` (variables in `scripts/test.sh`) | string | `8.30.1`, the sha256 of its linux-x64 tarball | The gitleaks download that `scripts/test.sh` makes in CI (`CI=true`), so the secret-rule tests run there. Keep them equal to the defaults in `reusable-gitleaks.yml` and to [toolchain.md](toolchain.md); a unit test compares them. |
 | `--allow-any-address` (`scripts/check_pack.py`) | flag | off | Accept any IP address instead of only loopback and the documentation ranges, for a copy of the configs with the addresses of your servers. CI never sets it. |
 | `--require-promtool` (`scripts/check_pack.py`) | flag | off | Fail when promtool is not on the `PATH`, instead of skipping `promtool check config`. The `promtool` job sets it. |
-| `--bin-dir`, `--timeout` (`scripts/smoke_exporters.py`) | path, seconds | the `PATH`, `120` | Where the three binaries are, and how long to wait for the first scrapes. |
+| `--bin-dir`, `--timeout` (`scripts/smoke_exporters.py`) | path, seconds | the `PATH`, `120` | Where the three binaries are, and how long to wait for each step: the first scrapes, the first evaluation of the rules, and each alert to go pending. |
 
 ## Secrets
 

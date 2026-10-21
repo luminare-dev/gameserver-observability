@@ -85,7 +85,42 @@ at 30 seconds or more.
 nor `sv_prometheusBasicAuthPassword` is set on the server.
 
 **Fix:** set both ([configuration](configuration.md#game-server)) and restart the server; see
-the [runbook](runbook.md#failure-the-probe-http_401_expected-fails).
+the [runbook](runbook.md#alert-fxserverperfendpointexposed).
+
+## Prometheus → Status → Rules shows no group `fxserver-alerts`
+
+**Cause:** the rule files are not loaded: `rule_files` is missing from `prometheus.yml`, its path
+does not match where the files are, or Prometheus was not reloaded. A file that does not parse
+stops the reload, and Prometheus logs the error and keeps the old rules.
+
+**Fix:** check the path (`rule_files: [/etc/prometheus/rules/*.yml]` with the files installed as
+in [Installation](install.md#install)), run `promtool check config /etc/prometheus/prometheus.yml`
+(it also checks the rule files it names) and reload Prometheus.
+
+## An alert names no game server (`server` is empty)
+
+**Cause:** the alert reads a series without the `server` label: the node_exporter or
+mysqld_exporter job, or a target of the pack's jobs, has no `server` label.
+
+**Fix:** add the label to every target of those jobs, with the name of the game server it belongs
+to ([configuration](configuration.md#host-and-database-jobs)).
+
+## `fxserver_recommended_build` is empty
+
+**Cause:** the job `fxserver_versions` is not loaded (`prometheus/scrape/versions.yml` is not in
+`scrape_config_files`), or json_exporter cannot fetch the version list: no outbound HTTPS from the
+Prometheus host, no DNS, a proxy in between, or missing CA certificates. json_exporter then logs
+`Failed to fetch JSON response` and the target answers `503`.
+
+**Fix:** check `up{job="fxserver_versions"}`, then ask json_exporter directly on the Prometheus
+host:
+
+```bash
+curl -fsS 'http://127.0.0.1:7979/probe?module=fxserver_versions&target=https://changelogs-live.fivem.net/api/changelog/versions/linux/server'
+```
+
+It must print `fxserver_recommended_build` with a build number. Allow outbound HTTPS for
+json_exporter, or, behind a proxy, set `proxy_url` in the module's `http_client_config`.
 
 ## `check_pack: … [parse] line N: …`
 

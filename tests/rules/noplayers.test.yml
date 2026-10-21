@@ -1,0 +1,225 @@
+# promtool unit tests for FXServerNoPlayersAfterRestart (rules/fxserver.alerts.yml).
+#   promtool test rules tests/rules/noplayers.test.yml   (scripts/check_promtool.sh runs all)
+#
+# One sample a minute over 6 hours. A restart shows as a reset of the svMain tick counter: here
+# from 286,800 at minute 239 to 0 at minute 240. Ranges leave out their first moment, so with
+# players up to minute 239 the alert is active while all of these hold:
+#   no player now and in the last 30 minutes            from minute 269 (samples 240 to 269 are 0)
+#   a reset in the last hour                            before minute 299 (samples 239 and 240 in it)
+#   no reset in the last 30 minutes                     from minute 269
+#   a player in the 30 minutes before the last 30       before minute 299 (sample 239 in it)
+# In the first test that is from minute 269 until minute 299.
+rule_files:
+  - ../../rules/fxserver.alerts.yml
+
+evaluation_interval: 30s
+
+tests:
+  - name: no player for 30 minutes after a restart of a busy server fires, then clears
+    interval: 1m
+    input_series:
+      - series: >-
+          fxserver_tick_time_seconds_count{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svMain"}
+        values: '0+1200x239 0+1200x120'
+      - series: >-
+          fxserver_clients{job="fxserver_json", instance="http://127.0.0.1:30120/dynamic.json",
+          module="fxserver_dynamic", server="game-01"}
+        values: '5x239 0x120'
+      # game-02 keeps its players and does not restart.
+      - series: >-
+          fxserver_tick_time_seconds_count{job="fxserver_perf", instance="192.0.2.11:30120", server="game-02",
+          thread="svMain"}
+        values: '0+1200x360'
+      - series: >-
+          fxserver_clients{job="fxserver_json", instance="http://192.0.2.11:30120/dynamic.json",
+          module="fxserver_dynamic", server="game-02"}
+        values: '7x360'
+    alert_rule_test:
+      - eval_time: 255m
+        alertname: FXServerNoPlayersAfterRestart
+        exp_alerts: []
+      - eval_time: 268m
+        alertname: FXServerNoPlayersAfterRestart
+        exp_alerts: []
+      - eval_time: 270m
+        alertname: FXServerNoPlayersAfterRestart
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              server: game-01
+            exp_annotations:
+              summary: "No players on game server game-01 since its restart"
+              description: >-
+                game-01 restarted 30 to 60 minutes ago and has had no player for the last 30
+                minutes, although players were online in the 30 minutes before. Players may not
+                find the server in the server list, or may not be able to join it.
+              runbook_url:
+                https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-fxservernoplayersafterrestart
+      - eval_time: 295m
+        alertname: FXServerNoPlayersAfterRestart
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              server: game-01
+            exp_annotations:
+              summary: "No players on game server game-01 since its restart"
+              description: >-
+                game-01 restarted 30 to 60 minutes ago and has had no player for the last 30
+                minutes, although players were online in the 30 minutes before. Players may not
+                find the server in the server list, or may not be able to join it.
+              runbook_url:
+                https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-fxservernoplayersafterrestart
+      # An hour after the restart the alert clears, even though the server is still empty: it
+      # reports a restart that players did not come back from, not an empty server.
+      - eval_time: 300m
+        alertname: FXServerNoPlayersAfterRestart
+        exp_alerts: []
+
+  - name: the 30 minutes start at the restart, also when the last player left shortly before it
+    # The last player leaves at minute 225, the restart is at minute 240. At minute 256 the server
+    # has been empty for 30 minutes, but the restart is only 16 minutes ago. From minute 270 the
+    # alert fires (the player at minute 225 is in the 30 minutes before the last 30) until
+    # minute 285.
+    interval: 1m
+    input_series:
+      - series: >-
+          fxserver_tick_time_seconds_count{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svMain"}
+        values: '0+1200x239 0+1200x120'
+      - series: >-
+          fxserver_clients{job="fxserver_json", instance="http://127.0.0.1:30120/dynamic.json",
+          module="fxserver_dynamic", server="game-01"}
+        values: '5x225 0x134'
+    alert_rule_test:
+      - eval_time: 256m
+        alertname: FXServerNoPlayersAfterRestart
+        exp_alerts: []
+      - eval_time: 275m
+        alertname: FXServerNoPlayersAfterRestart
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              server: game-01
+            exp_annotations:
+              summary: "No players on game server game-01 since its restart"
+              description: >-
+                game-01 restarted 30 to 60 minutes ago and has had no player for the last 30
+                minutes, although players were online in the 30 minutes before. Players may not
+                find the server in the server list, or may not be able to join it.
+              runbook_url:
+                https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-fxservernoplayersafterrestart
+      - eval_time: 286m
+        alertname: FXServerNoPlayersAfterRestart
+        exp_alerts: []
+
+  - name: a server that emptied more than 30 minutes before its restart does not fire
+    # The last player leaves at minute 200, 40 minutes before the restart (for example in the
+    # evening, before a restart at night).
+    interval: 1m
+    input_series:
+      - series: >-
+          fxserver_tick_time_seconds_count{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svMain"}
+        values: '0+1200x239 0+1200x120'
+      - series: >-
+          fxserver_clients{job="fxserver_json", instance="http://127.0.0.1:30120/dynamic.json",
+          module="fxserver_dynamic", server="game-01"}
+        values: '5x200 0x159'
+    alert_rule_test:
+      - eval_time: 256m
+        alertname: FXServerNoPlayersAfterRestart
+        exp_alerts: []
+      - eval_time: 275m
+        alertname: FXServerNoPlayersAfterRestart
+        exp_alerts: []
+      - eval_time: 290m
+        alertname: FXServerNoPlayersAfterRestart
+        exp_alerts: []
+
+  - name: players who come back after the restart do not fire
+    interval: 1m
+    input_series:
+      - series: >-
+          fxserver_tick_time_seconds_count{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svMain"}
+        values: '0+1200x239 0+1200x120'
+      - series: >-
+          fxserver_clients{job="fxserver_json", instance="http://127.0.0.1:30120/dynamic.json",
+          module="fxserver_dynamic", server="game-01"}
+        values: '5x239 0x9 3x111'
+    alert_rule_test:
+      - eval_time: 275m
+        alertname: FXServerNoPlayersAfterRestart
+        exp_alerts: []
+      - eval_time: 290m
+        alertname: FXServerNoPlayersAfterRestart
+        exp_alerts: []
+
+  - name: the 30 minutes without players count from the last player after the restart
+    # Players are back from minute 245 to 255 and leave again: no alert at minute 270, when the
+    # server has been empty for only 15 minutes; it fires from minute 285 until minute 299.
+    interval: 1m
+    input_series:
+      - series: >-
+          fxserver_tick_time_seconds_count{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svMain"}
+        values: '0+1200x239 0+1200x120'
+      - series: >-
+          fxserver_clients{job="fxserver_json", instance="http://127.0.0.1:30120/dynamic.json",
+          module="fxserver_dynamic", server="game-01"}
+        values: '5x239 0x4 3x10 0x104'
+    alert_rule_test:
+      - eval_time: 270m
+        alertname: FXServerNoPlayersAfterRestart
+        exp_alerts: []
+      - eval_time: 290m
+        alertname: FXServerNoPlayersAfterRestart
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              server: game-01
+            exp_annotations:
+              summary: "No players on game server game-01 since its restart"
+              description: >-
+                game-01 restarted 30 to 60 minutes ago and has had no player for the last 30
+                minutes, although players were online in the 30 minutes before. Players may not
+                find the server in the server list, or may not be able to join it.
+              runbook_url:
+                https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-fxservernoplayersafterrestart
+
+  - name: an empty server without a restart does not fire
+    interval: 1m
+    input_series:
+      - series: >-
+          fxserver_tick_time_seconds_count{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svMain"}
+        values: '0+1200x360'
+      - series: >-
+          fxserver_clients{job="fxserver_json", instance="http://127.0.0.1:30120/dynamic.json",
+          module="fxserver_dynamic", server="game-01"}
+        values: '5x239 0x120'
+    alert_rule_test:
+      - eval_time: 275m
+        alertname: FXServerNoPlayersAfterRestart
+        exp_alerts: []
+
+  - name: a server that is down after its restart does not fire (that is FXServerDown)
+    # The status scrape fails from minute 250 on, so the client count ends (stale).
+    interval: 1m
+    input_series:
+      - series: >-
+          fxserver_tick_time_seconds_count{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svMain"}
+        values: '0+1200x239 0+1200x9 stale'
+      - series: >-
+          fxserver_clients{job="fxserver_json", instance="http://127.0.0.1:30120/dynamic.json",
+          module="fxserver_dynamic", server="game-01"}
+        values: '5x239 0x9 stale'
+    alert_rule_test:
+      - eval_time: 275m
+        alertname: FXServerNoPlayersAfterRestart
+        exp_alerts: []
+      - eval_time: 290m
+        alertname: FXServerNoPlayersAfterRestart
+        exp_alerts: []

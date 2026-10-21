@@ -6,7 +6,9 @@ and asks json_exporter and blackbox_exporter for the rest
 ([`prometheus/scrape/fxserver.yml`](../prometheus/scrape/fxserver.yml)). Counts only: no series
 and no label holds a player's name, identifier, address or anything else tied to one player
 ([Not collected](#not-collected)). How many series this makes per server:
-[cardinality budget](cardinality.md).
+[cardinality budget](cardinality.md). The rules in `rules/` add
+[recorded series](#recorded-series-rulesfxserverrecordingyml) and also read a few
+[series of other exporters](#series-the-rules-read-from-other-exporters).
 
 ## How far each metric is verified
 
@@ -17,6 +19,8 @@ The **Verified** column says what was checked for the source field on the game s
   the Recommended build this project pins), on 2026-10-21.
 - **exporter**: the metric is made by the exporter or by Prometheus itself, not by the game
   server.
+- **live**: the field was read from the real endpoint through the exporter with this pack's
+  module (only possible for the public version list, not for a game server).
 - **unverified**: an assumption; the row says which one.
 
 No row has been checked against a running FXServer yet. That needs a server with a license key;
@@ -25,8 +29,9 @@ until then this is listed under Limitations in the README.
 The exported side is checked for every row except the optional tunnel probe:
 `scripts/smoke_exporters.py` (the CI job `exporters`) runs Prometheus 3.15.0, json_exporter 0.8.0
 and blackbox_exporter 0.29.0 with these configs against the fake server
-(`demo/fake-fxserver/fake_fxserver.py`), which answers with the shapes listed here, and checks the
-metric names, labels and values that arrive in Prometheus.
+(`demo/fake-fxserver/fake_fxserver.py`) and a synthetic version list, which answer with the shapes
+listed here, and checks the metric names, labels and values that arrive in Prometheus, and the
+recorded series of the rules.
 
 Every series also has the labels `job` (the scrape job) and `instance` (for `/perf/` the
 `host:port`, for the exporter jobs the probed URL or address). `server` is the label you set per
@@ -141,6 +146,25 @@ The series are the HTTP ones above, plus the TLS series blackbox_exporter adds f
 (certificate expiry, TLS version). Verified: unverified, because no tunnel exists here; the job
 is not part of the `exporters` run.
 
+## Job `fxserver_versions` (optional): the Recommended build
+
+[`prometheus/scrape/versions.yml`](../prometheus/scrape/versions.yml) asks json_exporter, with the
+module `fxserver_versions`, for the platform's public list of Linux server builds,
+`https://changelogs-live.fivem.net/api/changelog/versions/linux/server`, every 4 minutes. The list
+is the same for every game server, so the job runs once per Prometheus and its series have no
+`server` label. The request goes from json_exporter on the Prometheus host to the platform and
+carries nothing about your servers.
+
+| Metric | Type | Labels | Source endpoint and field | Verified |
+|---|---|---|---|---|
+| `fxserver_recommended_build` | gauge | `module` | `GET` version list: `recommended`, the build number of the current Recommended build, sent as a string such as `"35245"` that json_exporter reads as a number | live (35245 on 2026-10-21) |
+
+- **Fields:** the list also holds the Latest build, the download URL of each channel, and in
+  `support_policy` the date each build's support ends. Only `recommended` is read.
+- **Used by:** the alert `FXServerBuildBehindRecommended`
+  ([`rules/build.alerts.yml`](../rules/build.alerts.yml)), which compares it with the build each
+  game server runs.
+
 ## Series Prometheus adds per target
 
 | Metric | Type | Labels |
@@ -153,6 +177,49 @@ is not part of the `exporters` run.
 
 Each job sets a `sample_limit`, so a target that suddenly serves more series fails its scrape
 (`up` 0) instead of filling the database ([cardinality budget](cardinality.md)).
+
+## Recorded series (`rules/fxserver.recording.yml`)
+
+The recording rules turn the tick-time histogram into one series per server and thread, every
+30 seconds. Their names follow the Prometheus convention `level:metric:operations`: the level
+lists the labels the series keep ([ADR 0014](adr/0014-tick-time-over-one-minute-windows.md)).
+
+| Series | Labels | Meaning |
+|---|---|---|
+| `server_thread:fxserver_tick_time_seconds:p95_1m` | `server`, `thread` | 95th percentile of the tick time over the last minute, in seconds |
+| `server_thread:fxserver_tick_time_seconds:p99_1m` | `server`, `thread` | 99th percentile of the tick time over the last minute, in seconds |
+| `server_thread:fxserver_tick_time_seconds:mean1m` | `server`, `thread` | mean tick time over the last minute, in seconds |
+| `server_thread:fxserver_tick_time_seconds_count:rate1m` | `server`, `thread` | ticks per second over the last minute (`svMain` about 20 while its ticks are short) |
+
+- **Windows:** one minute, so a short spike stays visible and `FXServerTickTimeHigh`'s five
+  minutes are five minutes of slow ticks. A one-minute rate needs at least two `/perf/` scrapes
+  per minute; the pack scrapes every 15 seconds.
+- **Percentiles:** interpolated within the bucket the rank falls into. The highest bucket bound
+  below `+Inf` is 0.25 s, so a percentile among slower ticks reads 0.25.
+- **Checked:** `tests/rules/recording.test.yml` computes each series from hand-made histograms,
+  and the `exporters` run checks that each one exists per thread on the fake server's data.
+
+Alerts that are pending or firing also appear as the series `ALERTS` and `ALERTS_FOR_STATE`, with
+the alert's labels (`alertname`, `server`, `severity` and, for some alerts, `thread`, `job` or
+`mountpoint`).
+
+## Series the rules read from other exporters
+
+This pack ships no jobs for these exporters. Scrape them with jobs of your own and give every
+target the `server` label of its game server
+([configuration](configuration.md#host-and-database-jobs)); the alerts group by that label.
+
+| Metric | Exporter | Labels the rules use | Rule |
+|---|---|---|---|
+| `node_filesystem_avail_bytes`, `node_filesystem_size_bytes`, `node_filesystem_readonly` | node_exporter, filesystem collector (on by default) | `server`, `mountpoint`, `fstype` | `HostDiskAlmostFull` |
+| `fxserver_artifact_installed_timestamp_seconds` | node_exporter, textfile collector: `fxserver_artifact.prom`, written by the `fxserver` role of the `luminare.gameserver` collection when `fxserver_textfile_dir` is set | `server` | `FXServerArtifactOld` |
+| `fxserver_artifact_build` | the same file | `server` | `FXServerBuildBehindRecommended` |
+| `mysql_up` | mysqld_exporter | `server` | `MariaDBDown` |
+| `mysql_global_status_slow_queries` | mysqld_exporter, global status collector (on by default) | `server` | `MariaDBSlowQueries` |
+
+The two textfile metrics have no labels of their own: `fxserver_artifact_build` is the build
+number the `current` link points to, `fxserver_artifact_installed_timestamp_seconds` the Unix time
+that link was last replaced. Any other tool can write the same file for the alerts to work.
 
 ## Request paranoia and rate limits
 
