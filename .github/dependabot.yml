@@ -1,8 +1,12 @@
 # Dependabot version updates (https://docs.github.com/en/code-security/dependabot).
 # Keeps the SHA pins of the workflow actions and their "# vX.Y.Z" comments current, and the
-# hash-pinned Python tools in requirements-dev.txt. A 7-day cooldown lets a bad release surface
-# before it lands here. The pinned gitleaks and actionlint downloads (version + sha256 inputs in
-# the reusable workflows) are not seen by Dependabot; bump them by hand (PUBLISHING.md, monthly).
+# hash-pinned Python packages in requirements-dev.txt and requirements-test.txt (the pip entry
+# for "/" covers both; requirements-test.txt is recompiled from requirements-test.in). A 7-day
+# cooldown lets a bad release surface before it lands here. The pinned gitleaks, actionlint and
+# promtool downloads (version + sha256 in the workflows and scripts/test.sh) are not seen by
+# Dependabot; bump them by hand (docs/toolchain.md, monthly). Every ecosystem needs a
+# Conventional Commit prefix with "include: scope" and the "dependencies" label
+# (tests/test_pack_repo.py checks this).
 version: 2
 updates:
   - package-ecosystem: github-actions

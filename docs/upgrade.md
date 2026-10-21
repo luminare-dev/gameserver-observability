@@ -13,7 +13,5 @@ release may contain breaking changes; they are listed under "BREAKING CHANGES" i
 
 ## Version notes
 
-### {{VERSION}}
-
-<!-- template: one section per release with manual steps. Delete this section if no release needs
-     manual steps yet. -->
+There is no release yet, so no version needs manual steps. Each release that does gets its own
+section here.
