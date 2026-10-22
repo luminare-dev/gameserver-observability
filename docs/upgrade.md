@@ -67,5 +67,4 @@ ends with the update.
 
 ## Version notes
 
-There is no release yet, so no version needs manual steps. Each release that does gets its own
-section here.
+No release so far needs manual steps. A release that does gets its own section here.

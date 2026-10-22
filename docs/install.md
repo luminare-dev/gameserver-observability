@@ -12,8 +12,8 @@ collection, its roles set them
 ([With the luminare.gameserver collection](#with-the-luminaregameserver-collection)). To look at
 the pack first without a game server, start the [demo stack](demo.md).
 
-There is no release yet, so the commands use the `main` branch; once releases exist, check out a
-release tag instead and verify the download as shown below.
+Check out a release tag rather than the `main` branch, which can hold unreleased changes, and
+verify the download as shown below.
 
 The commands in [Install](#install), and those for Prometheus and the exporters in
 [Uninstall](#uninstall), were run on 2026-10-21 as root in
