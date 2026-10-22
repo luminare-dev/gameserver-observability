@@ -1,4 +1,5 @@
-# Development tools for CI (yamllint, zizmor). scripts/ and tests/ use the Python standard library only.
+# Development tools for CI (yamllint, zizmor). scripts/ use the Python standard library only; the
+# packages the tests need are in requirements-test.txt (installed by scripts/test.sh).
 #
 # Versions and the sha256 of every published file were read from PyPI on 2026-10-06.
 # Install with:  pip install --require-hashes --only-binary=:all: -r requirements-dev.txt

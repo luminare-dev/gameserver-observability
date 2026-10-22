@@ -1,7 +1,10 @@
 # gitleaks configuration: the built-in rules plus rules for game-server and chat secrets that
 # the defaults do not cover (checked against gitleaks 8.30.1's default config, 2026-10-06).
+# This repository adds the rule "cfx-license-key-any-shape" and the CHANGE_ME_... placeholders to
+# the oss-template rules, with the same rules as the luminare.gameserver collection
+# (docs/adr/0008-extra-secret-rule-for-any-cfxk-token.md).
 # Run locally:  gitleaks git --redact --config .gitleaks.toml .
-title = "oss-template gitleaks configuration"
+title = "gameserver-observability gitleaks configuration"
 
 [extend]
 useDefault = true
@@ -17,6 +20,21 @@ keywords = ["cfxk_"]
   description = "documentation placeholder made of x characters"
   regexes = ['''^cfxk_x+_x+$''']
 
+# The pack's docs and examples sit next to server configs that hold license keys, so this
+# repository also catches every cfxk_ value of 20 or more key characters, whatever its inner layout
+# and whatever comes before it (the rule above needs a <key>_<suffix> layout and a word boundary).
+# CfxKeyRuleTest in tests/test_pack_repo.py proves that both rules fire.
+[[rules]]
+id = "cfx-license-key-any-shape"
+description = "Value that starts like an FXServer license key (cfxk_ and 20 or more key characters)"
+regex = '''(cfxk_[A-Za-z0-9_]{20,})'''
+secretGroup = 1
+keywords = ["cfxk_"]
+
+  [[rules.allowlists]]
+  description = "documentation placeholder made of x characters"
+  regexes = ['''^cfxk_[x_]+$''']
+
 [[rules]]
 id = "fxserver-license-key-setting"
 description = "sv_licenseKey set to a literal value in a server config"
@@ -25,13 +43,13 @@ secretGroup = 1
 keywords = ["sv_licensekey"]
 
   [[rules.allowlists]]
-  description = "templated values (Ansible/Jinja, environment variables, convar references)"
+  description = "templated values (Ansible/Jinja, environment variables, convar references, CHANGE_ME_... placeholders)"
   regexTarget = "line"
-  regexes = ['''\{\{.*\}\}''', '''\$\{?[A-Za-z_]''', '''changeme''']
+  regexes = ['''\{\{.*\}\}''', '''\$\{?[A-Za-z_]''', '''changeme|CHANGE_ME_[A-Z0-9_]+''']
 
   [[rules.allowlists]]
   description = "documentation placeholders (YOUR_..., example, placeholder, the x-placeholder key)"
-  regexes = ['''(?i)^your[_-]''', '''(?i)example|placeholder''', '''^cfxk_x+_x+$''']
+  regexes = ['''(?i)^your[_-]''', '''(?i)example|placeholder''', '''^cfxk_[x_]+$''']
 
 [[rules]]
 id = "txadmin-api-token"

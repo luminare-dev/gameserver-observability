@@ -1,0 +1,9 @@
+# Python packages the pack's tests need (scripts/test.sh installs the compiled, hash-pinned
+# requirements-test.txt into its own virtual environment). Compile with Python 3.12, the version
+# of the GitHub ubuntu-24.04 runner, and CUSTOM_COMPILE_COMMAND set to the command itself, so the
+# header stays as committed (the exact docker command is in docs/toolchain.md):
+#   pip-compile --generate-hashes --strip-extras --output-file=requirements-test.txt requirements-test.in
+#
+# PyYAML: the tests parse the repository's YAML files (Dependabot, workflows, later the pack's
+# configs and rules).
+pyyaml==6.0.3

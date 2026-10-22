@@ -1,5 +1,6 @@
 # Caller: lint, tests and the full-history secret scan on every pull request and push to main.
 # Required checks for the main ruleset: "ci / lint-test" and "secrets / gitleaks".
+# The "promtool" job checks the pack's Prometheus rules (scripts/check_promtool.sh).
 name: ci
 
 on:
@@ -21,8 +22,42 @@ jobs:
     uses: ./.github/workflows/reusable-ci.yml
     permissions:
       contents: read
+    with:
+      # Same command as release.yml (tests/test_pack_repo.py checks that).
+      test-command: bash scripts/test.sh
 
   secrets:
     uses: ./.github/workflows/reusable-gitleaks.yml
     permissions:
       contents: read
+
+  promtool:
+    name: promtool
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      # Official Prometheus release tarball; sha256 from the release's sha256sums.txt
+      # (docs/toolchain.md, verified 2026-10-21). Dependabot does not see this pin: bump by hand.
+      PROMTOOL_VERSION: 3.15.0
+      PROMTOOL_SHA256: 2a542df32eac02ee17b9d844fb2aa1de00dafa5476579ba8a3ba862e9d572ea0
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install promtool (sha256-pinned)
+        run: |
+          set -euo pipefail
+          name="prometheus-${PROMTOOL_VERSION}.linux-amd64"
+          archive="$RUNNER_TEMP/${name}.tar.gz"
+          curl -fsSL -o "$archive" \
+            "https://github.com/prometheus/prometheus/releases/download/v${PROMTOOL_VERSION}/${name}.tar.gz"
+          echo "${PROMTOOL_SHA256}  ${archive}" | sha256sum -c -
+          tar -xzf "$archive" -C "$RUNNER_TEMP" --strip-components=1 "${name}/promtool"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Check and test the rules
+        run: bash scripts/check_promtool.sh

@@ -16,4 +16,3 @@ tests/test_forbidden_words.py | * | test sentences that must trigger the rules
 tests/test_check_pr_title.py | * | test titles that must be rejected for their wording
 scripts/set_byline.py | placeholder | prints the names of the placeholders to fill again after a brand swap
 LICENSE | sell | the licence grants the right to "sell copies" of the software
-licenses/*.txt | sell | unchanged licence texts that grant the right to sell copies
