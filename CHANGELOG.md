@@ -8,6 +8,13 @@ the Conventional Commit titles of the merged pull requests; do not edit entries 
 <!-- release-please inserts each new release above the first line that starts with "## ["
      (or "## " and a digit). Keep the "Origin" entry below as the last entry of this file. -->
 
+## [0.1.1](https://github.com/luminare-dev/gameserver-observability/compare/v0.1.0...v0.1.1) (2026-10-22)
+
+
+### Fixed
+
+* describe the published release in the readme and docs ([#10](https://github.com/luminare-dev/gameserver-observability/issues/10)) ([9d0d08d](https://github.com/luminare-dev/gameserver-observability/commit/9d0d08d4bf60e5e190e248bb1659e49b404c2e9a))
+
 ## 0.1.0 (2026-10-22)
 
 
