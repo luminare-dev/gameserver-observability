@@ -88,8 +88,8 @@ minutes later it fires. The last command removes the stack with its data.
 
 For a real server, install the scrape jobs, the exporter modules and the rules on your Prometheus
 host and the dashboard on your Grafana, as described in [Installation](docs/install.md); the game
-server only needs the two `/perf/` credentials. There is no release yet: until there is, the
-commands use the default branch, and afterwards a release tag (`git clone --branch vX.Y.Z …`).
+server only needs the two `/perf/` credentials. Use a release tag (`git clone --branch vX.Y.Z …`)
+and verify the release files as shown there; the default branch can hold unreleased changes.
 
 ## How it works
 
@@ -323,11 +323,6 @@ Fixes go into the latest minor release only. See the
   access-protected hostname, and it is not part of the `exporters` run.
 - There is no module for txAdmin's status endpoint, because its fields have not been checked
   ([probe log](docs/probe-log.md#txadmin-hoststatus)).
-- There is no release yet. Build provenance attestations are only created for public
-  repositories, so the first release is made after the repository is public.
-- The `promtool`, `exporters` and `demo-smoke` jobs are not required checks yet (`ci / lint-test`,
-  `secrets / gitleaks`, `pr / pr-title`, `DCO`); they are added to the ruleset after they have run
-  on a pull request.
 
 ## Results
 
