@@ -1,0 +1,44 @@
+# blackbox_exporter probe modules for the game server (blackbox_exporter 0.29.0).
+# Prometheus passes the module and the target per scrape (jobs fxserver_blackbox in
+# prometheus/scrape/fxserver.yml and fxserver_tunnel in prometheus/scrape/tunnel.yml). Run it on
+# loopback or a private address only:
+#   blackbox_exporter --config.file=/etc/blackbox_exporter/blackbox.yml --web.listen-address=127.0.0.1:9115
+# Probe results: docs/metrics.md.
+modules:
+  # The game port accepts TCP connections (target host:30120). UDP has no generic probe; the
+  # HTTP probes below go to the same port.
+  tcp_connect:
+    prober: tcp
+    timeout: 5s
+
+  # GET /info.json answers 200 with the server's info document (target http://host:30120/info.json).
+  http_fxserver_info:
+    prober: http
+    timeout: 5s
+    http:
+      method: GET
+      valid_status_codes: [200]
+      fail_if_body_not_matches_regexp: ['"resources"']
+      follow_redirects: false
+
+  # GET /perf/ without credentials must be refused with 401 (target http://host:30120/perf/).
+  # The server leaves /perf/ open to everyone when neither sv_prometheusBasicAuthUser nor
+  # sv_prometheusBasicAuthPassword is set; then this probe fails.
+  http_401_expected:
+    prober: http
+    timeout: 5s
+    http:
+      method: GET
+      valid_status_codes: [401]
+      follow_redirects: false
+
+  # An admin hostname behind an access proxy (target https://<name>.<zone>/): a request without a
+  # login must be redirected to the login page or refused, never answered with the admin page.
+  http_access_protected:
+    prober: http
+    timeout: 10s
+    http:
+      method: GET
+      valid_status_codes: [302, 303, 403]
+      follow_redirects: false
+      fail_if_not_ssl: true

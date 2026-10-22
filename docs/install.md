@@ -1,34 +1,91 @@
 # Installation
 
-The pack's configs, rules and dashboards are not in the repository yet, so there is nothing to
-install on a monitoring host today. This page covers what works now: getting the repository,
-running its checks, and verifying a release download once releases exist. The commands were run
-on Linux (x86-64) on 2026-10-21.
+Install the scrape jobs and the exporter modules on the host that runs Prometheus. The game server
+needs no software from this pack, only the two `/perf/` credentials
+([configuration](configuration.md#game-server)). There is no release yet, so the commands use the
+`main` branch; once releases exist, check out a release tag instead and verify the download as
+shown below.
+
+The commands in [Install](#install) and [Uninstall](#uninstall) were run on 2026-10-21 as root in
+a `python:3.13-slim` container, against the fake server: from a local copy instead of
+`git clone`, without `sudo`, with the password written by `printf` instead of `sudoedit`, with the
+exporters started by the commands of their `ExecStart=` lines and Prometheus 3.15.0 started
+directly instead of as services. All six targets were up and the queries in
+[Check that it works](#check-that-it-works) returned their series. On a second run, with an
+exporter config already in each place, the first Install block left both files unchanged.
+Run again on 2026-10-22 in the same image, the password block kept an existing password file and
+its content.
 
 ## Requirements
 
 | Requirement | Version | Notes |
 |---|---|---|
-| git | any recent | to clone the repository |
-| Python | 3.10 or newer, with the `venv` module | `scripts/test.sh` creates a virtual environment; on Debian and Ubuntu install `python3-venv` |
-| Network access to PyPI | | `scripts/test.sh` installs `requirements-test.txt` (hash-pinned, binary wheels only) |
-| promtool | 3.15.0 | optional, for `scripts/check_promtool.sh`; from the official Prometheus tarball ([toolchain](toolchain.md)) |
-| gitleaks | 8.30.1 | optional locally; with gitleaks on the `PATH` the tests also check the secret-scan rules. In CI, `scripts/test.sh` installs this version itself |
+| Prometheus | 3.15.0 tested | 3.x; `scrape_config_files` needs 2.43 or newer, the scrape jobs are checked with promtool 3.15.0 |
+| json_exporter | 0.8.0 tested | the module format of 0.8.0 ([toolchain](toolchain.md) has the download and sha256) |
+| blackbox_exporter | 0.29.0 tested | |
+| Game server (FXServer) | build 35245 read in the source | not yet tried against a running server; see the README's Limitations |
+| Network | | the Prometheus host reaches the game port (30120) over loopback, a private network or a tunnel; the exporters listen on 127.0.0.1 |
+| Python | 3.10 or newer | only for the pack check, the fake server and the repository's tests |
 
 ## Install
+
+`/etc/prometheus/scrape/fxserver.yml` is this pack's own file. The two exporter configs are
+installed only where none exists yet: `test -e … ||` skips a file that is already there, so an
+exporter that serves other modules keeps them. If json_exporter or blackbox_exporter already runs
+on this host (a distribution package may keep its config in another place), copy this pack's
+modules into that config under `modules:` instead, after checking that it has no modules of the
+same names: `fxserver_dynamic` and `fxserver_info` from `json_exporter/config.yml`, and
+`tcp_connect`, `http_fxserver_info`, `http_401_expected` and `http_access_protected` from
+`blackbox/blackbox.yml`.
 
 ```bash
 git clone https://github.com/luminare-dev/gameserver-observability.git
 cd gameserver-observability
-bash scripts/test.sh
+sudo install -D -m 0644 prometheus/scrape/fxserver.yml /etc/prometheus/scrape/fxserver.yml
+test -e /etc/json_exporter/config.yml || sudo install -D -m 0644 json_exporter/config.yml /etc/json_exporter/config.yml
+test -e /etc/blackbox_exporter/blackbox.yml || sudo install -D -m 0644 blackbox/blackbox.yml /etc/blackbox_exporter/blackbox.yml
 ```
 
-To run the rule checks as the CI job `promtool` does, install promtool as shown on the
-[toolchain page](toolchain.md), put it on the `PATH` and run:
+Then change the targets and the `server` label in `/etc/prometheus/scrape/fxserver.yml`
+([configuration](configuration.md#scrape-jobs-prometheusscrapefxserveryml)), and write the `/perf/`
+password into a file only Prometheus can read (the group is the one Prometheus runs as, often
+`prometheus`):
 
 ```bash
-bash scripts/check_promtool.sh
+sudo install -d -m 0750 -g prometheus /etc/prometheus/secrets
+test -e /etc/prometheus/secrets/fxserver_perf || sudo install -m 0640 -g prometheus /dev/null /etc/prometheus/secrets/fxserver_perf
+sudoedit /etc/prometheus/secrets/fxserver_perf   # the password only, one line
 ```
+
+Include the jobs in `/etc/prometheus/prometheus.yml`:
+
+```yaml
+scrape_config_files:
+  - /etc/prometheus/scrape/fxserver.yml
+```
+
+Run both exporters as services of your init system, listening on loopback. If they are not
+services yet, these are the `ExecStart=` lines of their systemd units (binaries in
+`/usr/local/bin`; the downloads and their sha256 are on the [toolchain page](toolchain.md)); use
+the path of the merged config if you merged the modules:
+
+```ini
+# json_exporter.service
+ExecStart=/usr/local/bin/json_exporter --config.file=/etc/json_exporter/config.yml --web.listen-address=127.0.0.1:7979
+# blackbox_exporter.service
+ExecStart=/usr/local/bin/blackbox_exporter --config.file=/etc/blackbox_exporter/blackbox.yml --web.listen-address=127.0.0.1:9115
+```
+
+Restart an exporter that was already running, so that it loads the new modules. Then check the
+Prometheus config and reload Prometheus:
+
+```bash
+promtool check config /etc/prometheus/prometheus.yml
+sudo systemctl reload prometheus
+```
+
+For the optional admin hostname probe, install `prometheus/scrape/tunnel.yml` to
+`/etc/prometheus/scrape/tunnel.yml` the same way and add it to `scrape_config_files`.
 
 ## Verify the release download
 
@@ -42,29 +99,68 @@ gh attestation verify gameserver-observability-X.Y.Z.tar.gz --repo luminare-dev/
 
 ## Check that it works
 
-`bash scripts/test.sh` ends with a summary like this one, from a machine without gitleaks and
-markdownlint-cli2 (the tests that need them are skipped; the number of tests grows with the pack):
+In Prometheus (Status → Targets) the jobs `fxserver_perf`, `fxserver_json` and
+`fxserver_blackbox` are up, and these queries return one series per game server (three for
+the probe):
 
-```text
-Ran 116 tests in 1.812s
-
-OK (skipped=10)
+```promql
+fxserver_clients
+fxserver_tick_time_seconds_count{thread="svMain"}
+probe_success{job="fxserver_blackbox"}
 ```
 
-`bash scripts/check_promtool.sh` prints the promtool version and, while `rules/` is empty:
+`probe_success{module="http_401_expected"}` must be 1: it is 0 when `/perf/` answers without
+credentials. [Troubleshooting](troubleshooting.md) covers the usual errors.
+
+## Check the repository
+
+```bash
+bash scripts/test.sh                    # unit tests, including the fake server and the pack check
+python3 scripts/check_pack.py           # configs parse, privacy rules, and promtool when on the PATH
+bash scripts/check_promtool.sh          # rule files (needs promtool)
+python3 scripts/smoke_exporters.py      # end to end (needs prometheus, json_exporter, blackbox_exporter)
+```
+
+`scripts/test.sh` ends with a summary like this one, from a machine without gitleaks,
+markdownlint-cli2 and promtool (the tests that need them are skipped):
 
 ```text
-promtool, version 3.15.0 (branch: HEAD, revision: 5241a27fe3c6983549fccc32f6e65917408c63cd)
-rules/: no rule files to check
-tests/rules/: no rule tests to run
+Ran 187 tests in 4.742s
+
+OK (skipped=11)
+```
+
+`python3 scripts/check_pack.py` with promtool on the `PATH` prints:
+
+```text
+check_pack: 0 finding(s) in 4 parsed file(s); promtool: 2 file(s) passed promtool check config
+```
+
+`python3 scripts/smoke_exporters.py --bin-dir bin` (binaries as on the [toolchain page](toolchain.md))
+prints one line per check and ends with:
+
+```text
+smoke_exporters: all checks passed (34 s)
 ```
 
 ## Uninstall
 
-Delete the clone and the test environment. `scripts/test.sh` keeps its virtual environment in
-`$TEST_VENV`, by default `~/.cache/gameserver-observability/test-venv` (under `$XDG_CACHE_HOME`
-instead of `~/.cache` when that is set):
+Remove the `scrape_config_files` entries and reload Prometheus. Stop the exporters, or, if they
+serve other modules too, delete this pack's modules from their configs and restart them. Then
+delete the files this pack installed, the clone and the virtual environment of `scripts/test.sh`:
 
 ```bash
+sudo rm -f /etc/prometheus/scrape/fxserver.yml /etc/prometheus/secrets/fxserver_perf
 rm -rf gameserver-observability "${XDG_CACHE_HOME:-$HOME/.cache}/gameserver-observability"
 ```
+
+Only where they apply: the admin hostname probe, if you installed it, and the exporter configs, if
+[Install](#install) created them (keep them if the modules were merged into existing configs):
+
+```bash
+sudo rm -f /etc/prometheus/scrape/tunnel.yml
+sudo rm -f /etc/json_exporter/config.yml /etc/blackbox_exporter/blackbox.yml
+```
+
+Directories that are empty afterwards (`/etc/prometheus/secrets`, `/etc/json_exporter`,
+`/etc/blackbox_exporter`) can be removed with `sudo rmdir`.

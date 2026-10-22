@@ -1,0 +1,188 @@
+# Metrics reference
+
+Every series this pack collects, where it comes from and how far it is verified. All of them are
+collected from outside the server process: Prometheus scrapes `/perf/` on the game port directly
+and asks json_exporter and blackbox_exporter for the rest
+([`prometheus/scrape/fxserver.yml`](../prometheus/scrape/fxserver.yml)). Counts only: no series
+and no label holds a player's name, identifier, address or anything else tied to one player
+([Not collected](#not-collected)). How many series this makes per server:
+[cardinality budget](cardinality.md).
+
+## How far each metric is verified
+
+The **Verified** column says what was checked for the source field on the game server:
+
+- **source**: the endpoint, the field, its type and its access rule were read in the FXServer
+  source code of build 35245 (commit [`6efb47d`](https://github.com/citizenfx/fivem/tree/6efb47dff473c0e2a12fb50b08d74c0eb24a50d5/code/components/citizen-server-impl/src),
+  the Recommended build this project pins), on 2026-10-21.
+- **exporter**: the metric is made by the exporter or by Prometheus itself, not by the game
+  server.
+- **unverified**: an assumption; the row says which one.
+
+No row has been checked against a running FXServer yet. That needs a server with a license key;
+until then this is listed under Limitations in the README.
+
+The exported side is checked for every row except the optional tunnel probe:
+`scripts/smoke_exporters.py` (the CI job `exporters`) runs Prometheus 3.15.0, json_exporter 0.8.0
+and blackbox_exporter 0.29.0 with these configs against the fake server
+(`demo/fake-fxserver/fake_fxserver.py`), which answers with the shapes listed here, and checks the
+metric names, labels and values that arrive in Prometheus.
+
+Every series also has the labels `job` (the scrape job) and `instance` (for `/perf/` the
+`host:port`, for the exporter jobs the probed URL or address). `server` is the label you set per
+game server in the scrape config. Because `instance` can hold a host address or hostname, shared
+views group by `server` and leave `instance` out
+([ADR 0013](adr/0013-probed-target-in-the-instance-label.md)).
+
+## Job `fxserver_perf`: `/perf/` on the game port
+
+| Metric | Type | Labels | Source endpoint and field | Verified |
+|---|---|---|---|---|
+| `fxserver_tick_time_seconds_bucket` | counter (histogram bucket) | `server`, `thread`, `le` | `GET /perf/`: `tickTime_bucket{name="…",le="…"}` | source |
+| `fxserver_tick_time_seconds_sum` | counter (seconds) | `server`, `thread` | `GET /perf/`: `tickTime_sum{name="…"}` | source |
+| `fxserver_tick_time_seconds_count` | counter (ticks) | `server`, `thread` | `GET /perf/`: `tickTime_count{name="…"}` | source |
+
+- **What it measures:** the time each server thread spends on one tick, measured in whole
+  milliseconds and recorded in seconds
+  ([`GameServer.cpp`](https://github.com/citizenfx/fivem/blob/6efb47dff473c0e2a12fb50b08d74c0eb24a50d5/code/components/citizen-server-impl/src/GameServer.cpp)).
+  `thread` is `svMain` (server frame with the resources' work, a timer every 50 ms),
+  `svNetwork` (network packets, every 10 ms) or `svSync` (OneSync state, every 8 ms). A tick that
+  takes longer than its interval delays the next one, so the tick rate drops under load.
+- **Buckets:** 0.001, 0.002, 0.004, 0.006, 0.008, 0.010, 0.015, 0.020, 0.030, 0.050, 0.070, 0.100,
+  0.150 and 0.250 seconds, plus `+Inf`: 15 bucket series per thread.
+- **Renaming:** the scrape job keeps only `tickTime_bucket`, `tickTime_sum` and `tickTime_count`
+  (anything else a server version serves on `/perf/` is dropped), renames them to
+  `fxserver_tick_time_seconds_*`, copies the `name` label to `thread` and drops `name`
+  ([ADR 0010](adr/0010-rename-tick-time-to-fxserver-tick-time-seconds.md)).
+- **Access:** when `sv_prometheusBasicAuthUser` or `sv_prometheusBasicAuthPassword` is set, a
+  request without exactly these Basic credentials gets `401` with the body `Unauthorized.`; when
+  both are empty, `/perf/` is open to anyone, limited to 2 requests per second (burst 5) per
+  address
+  ([`PerfHttpHandler.cpp`](https://github.com/citizenfx/fivem/blob/6efb47dff473c0e2a12fb50b08d74c0eb24a50d5/code/components/citizen-server-impl/src/PerfHttpHandler.cpp)).
+  The probe `http_401_expected` below fails in that case.
+- **Format:** the server answers with `Content-Type: text/plain`; Prometheus 3.15.0 reads that
+  as the classic text format without a fallback setting (checked in the `exporters` run).
+
+## Job `fxserver_json`: `info.json` and `dynamic.json` through json_exporter
+
+Modules in [`json_exporter/config.yml`](../json_exporter/config.yml). The extra label `module`
+is the json_exporter module that made the series.
+
+| Metric | Type | Labels | Source endpoint and field | Verified |
+|---|---|---|---|---|
+| `fxserver_clients` | gauge | `server`, `module` | `GET /dynamic.json`: `clients`, the number of connected clients | source |
+| `fxserver_max_clients` | gauge | `server`, `module` | `GET /dynamic.json`: `sv_maxclients`, the player slots, sent as a string such as `"32"` that json_exporter reads as a number | source |
+| `fxserver_info` | gauge, always 1 | `server`, `module`, `version`, `build` | `GET /info.json`: `server`, `FXServer-` and the build description | source; `build`: unverified |
+| `fxserver_onesync_enabled` | gauge, 0 or 1 | `server`, `module` | `GET /info.json`: `vars.onesync_enabled`, `"true"` or `"false"` | source |
+
+- **Fields:** `dynamic.json` holds `hostname`, `gametype`, `mapname`, `clients`, `iv` and
+  `sv_maxclients`; `info.json` holds `server`, `enhancedHostSupport`, `resources`, `vars`,
+  `requestSteamTicket`, `enforceSteamAuth`, `version` and, with a server icon, `icon`
+  ([`InfoHttpHandler.cpp`](https://github.com/citizenfx/fivem/blob/6efb47dff473c0e2a12fb50b08d74c0eb24a50d5/code/components/citizen-server-impl/src/InfoHttpHandler.cpp)).
+  Only the four fields in the table are read.
+- **`version` and `build`:** `version` is the raw `server` string, `FXServer-` followed by the
+  build description. The Linux build script writes the description as
+  `<branch> <CI build number> linux` for master and release builds, and as
+  `<branch> SERVER v1.0.0.<date> linux` only for feature branches
+  ([`build_server_proot_alpine.sh`](https://github.com/citizenfx/fivem/blob/6efb47dff473c0e2a12fb50b08d74c0eb24a50d5/code/tools/ci/build_server_proot_alpine.sh)).
+  The server library in the build 35245 download (`libcitizen-server-impl.so`) holds the text
+  `FXServer-master v1.0.0.35245 linux`; it has not yet been seen on a running server. The fake
+  server serves that shape. The scrape job copies the digits after `v<a>.<b>.<c>.` into
+  `build`, with or without `SERVER` before them (a unit test checks both); if the real string
+  has another shape, `build` is missing and `version` still has the whole string. The label
+  changes only when the server is upgraded.
+- **OneSync:** the server sets `onesync_enabled` to true at start when `onesync` is `on` or
+  `legacy` ([`ServerGameState.cpp`](https://github.com/citizenfx/fivem/blob/6efb47dff473c0e2a12fb50b08d74c0eb24a50d5/code/components/citizen-server-impl/src/state/ServerGameState.cpp)).
+  When the variable is missing, the module returns no series instead of an error.
+- **Errors:** json_exporter answers `503` when the server's status code is not 2xx (for example
+  `403 Nope.`, see [Request paranoia](#request-paranoia-and-rate-limits)); then `up` is 0 for
+  that target.
+
+## Job `fxserver_blackbox`: probes of the game port
+
+Modules in [`blackbox/blackbox.yml`](../blackbox/blackbox.yml); each probe target has the labels
+`server` and `module`.
+
+| Module | Target | Succeeds when | Verified |
+|---|---|---|---|
+| `tcp_connect` | `host:30120` | the game port accepts a TCP connection | exporter |
+| `http_fxserver_info` | `http://host:30120/info.json` | `GET` answers `200` with a body that contains `"resources"` | exporter; field: source |
+| `http_401_expected` | `http://host:30120/perf/` | `GET` without credentials is refused with `401` | exporter; behaviour: source |
+
+The probes produce these series (blackbox_exporter 0.29.0, as seen in the `exporters` run):
+
+| Metric | Type | Labels | Modules |
+|---|---|---|---|
+| `probe_success` | gauge, 0 or 1 | `server`, `module` | all |
+| `probe_duration_seconds` | gauge | `server`, `module` | all |
+| `probe_dns_lookup_time_seconds` | gauge | `server`, `module` | all |
+| `probe_ip_protocol` | gauge (4 or 6) | `server`, `module` | all |
+| `probe_ip_addr_hash` | gauge (hash of the address, to spot changes) | `server`, `module` | all |
+| `probe_timeout_seconds` | gauge | `server`, `module` | all |
+| `probe_failed_due_to_regex` | gauge, 0 or 1 | `server`, `module` | all |
+| `probe_failed_due_to_bytes` | gauge, 0 or 1 | `server`, `module` | `tcp_connect` |
+| `probe_http_status_code` | gauge | `server`, `module` | HTTP modules |
+| `probe_http_duration_seconds` | gauge | `server`, `module`, `phase` | HTTP modules |
+| `probe_http_content_length` | gauge | `server`, `module` | HTTP modules |
+| `probe_http_uncompressed_body_length` | gauge | `server`, `module` | HTTP modules |
+| `probe_http_redirects` | gauge | `server`, `module` | HTTP modules |
+| `probe_http_ssl` | gauge, 0 or 1 | `server`, `module` | HTTP modules |
+| `probe_http_version` | gauge | `server`, `module` | HTTP modules |
+
+UDP on the game port has no generic probe; the TCP connect and the two HTTP probes go to the same
+port.
+
+## Job `fxserver_tunnel` (optional): the admin hostname
+
+[`prometheus/scrape/tunnel.yml`](../prometheus/scrape/tunnel.yml) probes a hostname that an
+access-protected tunnel publishes, for example the txAdmin web interface, with the module
+`http_access_protected`: a `GET` without a login must answer `302`, `303` or `403` over HTTPS.
+The series are the HTTP ones above, plus the TLS series blackbox_exporter adds for HTTPS targets
+(certificate expiry, TLS version). Verified: unverified, because no tunnel exists here; the job
+is not part of the `exporters` run.
+
+## Series Prometheus adds per target
+
+| Metric | Type | Labels |
+|---|---|---|
+| `up` | gauge, 0 or 1 | `server`, `module` (exporter jobs) |
+| `scrape_duration_seconds` | gauge | same |
+| `scrape_samples_scraped` | gauge | same |
+| `scrape_samples_post_metric_relabeling` | gauge | same |
+| `scrape_series_added` | gauge | same |
+
+Each job sets a `sample_limit`, so a target that suddenly serves more series fails its scrape
+(`up` 0) instead of filling the database ([cardinality budget](cardinality.md)).
+
+## Request paranoia and rate limits
+
+From the source of build 35245:
+
+- `sv_requestParanoia` 1 refuses `info.json`, `dynamic.json` and `players.json` requests that
+  carry a `Via` header (sent by proxies); 2 also refuses requests with
+  `Upgrade-Insecure-Requests` (sent by browsers). A refused request gets `403 Nope.` and the
+  server blocks the sending address. json_exporter and blackbox_exporter send neither header, so
+  direct scrapes keep working at every level; a proxy between them and the server would be
+  refused from level 1.
+- `info.json` and `players.json` are limited to 4 requests per second (burst 10) per address;
+  this pack requests `info.json` twice per 30 seconds. `dynamic.json` has no limit.
+  Unauthenticated `/perf/` requests are limited as described above; authenticated ones are not.
+
+## Not collected
+
+- **`players.json`, in any form.** The player count comes from `dynamic.json` `clients`. Without
+  the players token (`sv_playersToken`) the server serves an anonymous entry per client there,
+  with it names and identifiers; the pack needs neither, so no target, module or rule names that
+  endpoint, and `scripts/check_pack.py` fails if one does
+  ([ADR 0009](adr/0009-counts-only-from-the-status-endpoints.md)).
+- **Any label tied to a player:** names, identifiers (license, Steam, Discord and so on), IP
+  addresses, endpoints, pings or player IDs. `scripts/check_pack.py` rejects such label names in
+  the scrape config, the relabel rules and the exporter modules, and the `exporters` run checks
+  the labels that arrive in Prometheus.
+- **Everything else in `info.json` and `dynamic.json`:** project name and description, host
+  name, tags, locale, other variables, the resource list (one series per resource would break
+  the [cardinality budget](cardinality.md)), the icon and the version hash.
+- **txAdmin's own status endpoint:** its fields have not been checked yet, so there is no module
+  for it.
+- **The exporters' own `/metrics`:** not scraped by these jobs; add a job of your own if you want
+  the exporters' process metrics.

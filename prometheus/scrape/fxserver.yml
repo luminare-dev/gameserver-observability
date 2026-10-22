@@ -1,0 +1,98 @@
+# Scrape jobs for one game server (FXServer), all collected from outside the server process.
+# Include the file from prometheus.yml:
+#   scrape_config_files: [/etc/prometheus/scrape/fxserver.yml]
+# or copy the jobs into scrape_configs. For your server, change the targets and the server label
+# (the same value in every job); docs/configuration.md describes each setting and
+# docs/metrics.md each metric.
+#
+# Assumes, on the Prometheus host: json_exporter on 127.0.0.1:7979 with json_exporter/config.yml,
+# blackbox_exporter on 127.0.0.1:9115 with blackbox/blackbox.yml, and the /perf/ password in
+# /etc/prometheus/secrets/fxserver_perf (the password only, readable by Prometheus, never in git).
+scrape_configs:
+  # /perf/ on the game port serves the tickTime histogram. Set sv_prometheusBasicAuthUser and
+  # sv_prometheusBasicAuthPassword on the server (secrets.cfg); without them /perf/ is open.
+  - job_name: fxserver_perf
+    scrape_interval: 15s
+    metrics_path: /perf/
+    basic_auth:
+      username: prometheus
+      password_file: /etc/prometheus/secrets/fxserver_perf
+    sample_limit: 100
+    static_configs:
+      - targets: ["127.0.0.1:30120"]
+        labels:
+          server: game-01
+    metric_relabel_configs:
+      # Keep only the tick-time histogram, whatever else a server version adds.
+      - source_labels: [__name__]
+        regex: tickTime_(bucket|sum|count)
+        action: keep
+      # tickTime_*{name="svMain"} becomes fxserver_tick_time_seconds_*{thread="svMain"}.
+      - source_labels: [__name__]
+        regex: tickTime_(bucket|sum|count)
+        target_label: __name__
+        replacement: fxserver_tick_time_seconds_$1
+      - source_labels: [name]
+        target_label: thread
+      - regex: name
+        action: labeldrop
+
+  # dynamic.json and info.json through json_exporter: client count, slots, version, OneSync.
+  # players.json is never a target: the count comes from dynamic.json.
+  - job_name: fxserver_json
+    scrape_interval: 30s
+    metrics_path: /probe
+    sample_limit: 20
+    static_configs:
+      - targets: ["http://127.0.0.1:30120/dynamic.json"]
+        labels:
+          server: game-01
+          module: fxserver_dynamic
+      - targets: ["http://127.0.0.1:30120/info.json"]
+        labels:
+          server: game-01
+          module: fxserver_info
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [module]
+        target_label: __param_module
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 127.0.0.1:7979
+    metric_relabel_configs:
+      # The build number from the version string, e.g. "FXServer-master v1.0.0.35245 linux".
+      - source_labels: [__name__, version]
+        regex: fxserver_info;.*v[0-9]+\.[0-9]+\.[0-9]+\.([0-9]+).*
+        target_label: build
+        replacement: $1
+
+  # blackbox_exporter: the game port accepts TCP, info.json answers, /perf/ refuses anonymous
+  # requests.
+  - job_name: fxserver_blackbox
+    scrape_interval: 30s
+    metrics_path: /probe
+    sample_limit: 60
+    static_configs:
+      - targets: ["127.0.0.1:30120"]
+        labels:
+          server: game-01
+          module: tcp_connect
+      - targets: ["http://127.0.0.1:30120/info.json"]
+        labels:
+          server: game-01
+          module: http_fxserver_info
+      - targets: ["http://127.0.0.1:30120/perf/"]
+        labels:
+          server: game-01
+          module: http_401_expected
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [module]
+        target_label: __param_module
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 127.0.0.1:9115

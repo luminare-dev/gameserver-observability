@@ -1,0 +1,24 @@
+# Optional scrape job: probe the admin hostname that an access-protected tunnel publishes (for
+# example the txAdmin web interface). Include it only when there is such a hostname:
+#   scrape_config_files: [/etc/prometheus/scrape/fxserver.yml, /etc/prometheus/scrape/tunnel.yml]
+# Replace the target with your hostname and keep the server label equal to the one in
+# fxserver.yml. Uses blackbox_exporter on 127.0.0.1:9115 with blackbox/blackbox.yml.
+scrape_configs:
+  - job_name: fxserver_tunnel
+    scrape_interval: 60s
+    metrics_path: /probe
+    sample_limit: 60
+    static_configs:
+      - targets: ["https://demo-tx.example.com/"]
+        labels:
+          server: game-01
+          module: http_access_protected
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [module]
+        target_label: __param_module
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 127.0.0.1:9115
