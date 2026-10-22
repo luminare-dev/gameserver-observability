@@ -1,0 +1,69 @@
+# promtool unit tests for FXServerPerfEndpointExposed (rules/fxserver.alerts.yml).
+#   promtool test rules tests/rules/perf_exposed.test.yml   (scripts/check_promtool.sh runs all)
+#
+# The probe http_401_expected requests /perf/ without credentials every 30 s. 401 is the healthy
+# answer; 200 means /perf/ is open; 0 means no answer at all (the server is down).
+rule_files:
+  - ../../rules/fxserver.alerts.yml
+
+evaluation_interval: 30s
+
+tests:
+  - name: /perf/ answering 200 without credentials fires after 5 minutes
+    # Open from 5m30s on (for example after the credentials were removed and the server restarted).
+    interval: 30s
+    input_series:
+      - series: >-
+          probe_http_status_code{job="fxserver_blackbox", instance="http://127.0.0.1:30120/perf/",
+          module="http_401_expected", server="game-01"}
+        values: '401x10 200x30'
+      - series: >-
+          probe_http_status_code{job="fxserver_blackbox", instance="http://192.0.2.11:30120/perf/",
+          module="http_401_expected", server="game-02"}
+        values: '401x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: FXServerPerfEndpointExposed
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: FXServerPerfEndpointExposed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              server: game-01
+            exp_annotations:
+              summary: "Game server game-01 serves /perf/ without credentials"
+              description: >-
+                For 5 minutes /perf/ on game-01 has answered a request without credentials with
+                HTTP 200 instead of 401. Anyone who reaches the game port can read the server's
+                tick times.
+              runbook_url:
+                https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-fxserverperfendpointexposed
+
+  - name: /perf/ refusing with 401 does not fire
+    interval: 30s
+    input_series:
+      - series: >-
+          probe_http_status_code{job="fxserver_blackbox", instance="http://127.0.0.1:30120/perf/",
+          module="http_401_expected", server="game-01"}
+        values: '401x40'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: FXServerPerfEndpointExposed
+        exp_alerts: []
+
+  - name: no answer from a server that is down does not fire (that is FXServerDown)
+    interval: 30s
+    input_series:
+      - series: >-
+          probe_http_status_code{job="fxserver_blackbox", instance="http://127.0.0.1:30120/perf/",
+          module="http_401_expected", server="game-01"}
+        values: '401x10 0x30'
+      - series: >-
+          probe_success{job="fxserver_blackbox", instance="http://127.0.0.1:30120/perf/", module="http_401_expected",
+          server="game-01"}
+        values: '1x10 0x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: FXServerPerfEndpointExposed
+        exp_alerts: []

@@ -27,7 +27,12 @@ So one game server costs **129 series** with the default jobs. Prometheus' own s
 `scrape_duration_seconds`, `scrape_samples_scraped`, `scrape_samples_post_metric_relabeling` and
 `scrape_series_added`, five per target. The optional `fxserver_tunnel` job adds one HTTPS probe
 (the HTTP series plus a few TLS series, not measured here, at most 60 by its limit) and five
-Prometheus series.
+Prometheus series. The optional `fxserver_versions` job runs once per Prometheus, not per server:
+1 sample per scrape (measured in the same run) and five Prometheus series.
+
+The recording rules add 4 series per thread, 12 per game server
+([recorded series](metrics.md#recorded-series-rulesfxserverrecordingyml)). Alerts add two series
+each (`ALERTS` and `ALERTS_FOR_STATE`) only while they are pending or firing.
 
 ## The whole budget per server
 
@@ -35,16 +40,18 @@ Prometheus series.
 |---|---|---|
 | This pack, default jobs | 129 measured; at most 350 by the sample limits (100 + 2 × 20 + 3 × 60, plus 30 from Prometheus) | `sample_limit` per job |
 | This pack, tunnel probe | at most 65 | `sample_limit: 60` |
+| This pack, version list | at most 15, once per Prometheus | `sample_limit: 10` |
+| This pack, recording rules | 12 (4 series × 3 threads) | grouped by `server` and `thread` only |
 | Reserve: node_exporter on the game host | 900 | not part of this pack: set `sample_limit` on your job and filter collectors you do not use |
 | Reserve: mysqld_exporter | 400 | the same |
 | Reserve: tunnel connector metrics | 150 | the same |
 | Reserve: textfile metrics (for example the installed build and its age) | 10 | the same |
-| **Total** | **at most 1,875** | |
+| **Total** | **at most 1,902** | |
 
 The reserves are planning values for the exporters that monitor the host and the database; this
 repository does not ship their configs. With the measured 129 series for the default jobs instead
-of their limit of 350, and without the tunnel probe, 411 of the 2,000 series stay free when the
-reserves are used up (346 with the tunnel probe at its limit).
+of their limit of 350, and without the optional jobs, 399 of the 2,000 series stay free when the
+reserves are used up (319 with the tunnel probe and the version list at their limits).
 
 ## What is left out, and why
 
@@ -57,7 +64,8 @@ reserves are used up (346 with the tunnel probe at its limit).
 
 ## What changes the numbers
 
-- **Each further game server** adds the same 129 series (its own targets and `server` label).
+- **Each further game server** adds the same 129 series (its own targets and `server` label),
+  plus 12 recorded series.
 - **An upgrade** changes the `version` and `build` labels of `fxserver_info`: one new series,
   while the old one stops getting samples.
 - **Another bucket layout** in a future server version changes the 51 `/perf/` series; the

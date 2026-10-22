@@ -1,6 +1,7 @@
 # json_exporter modules for the game server's status endpoints (json_exporter 0.8.0 format).
 # Prometheus passes the module and the target URL per scrape (job fxserver_json in
-# prometheus/scrape/fxserver.yml). Run json_exporter on loopback or a private address only:
+# prometheus/scrape/fxserver.yml, and the optional job fxserver_versions in
+# prometheus/scrape/versions.yml). Run json_exporter on loopback or a private address only:
 #   json_exporter --config.file=/etc/json_exporter/config.yml --web.listen-address=127.0.0.1:7979
 #
 # Counts only: the player count comes from dynamic.json, never from players.json, and no label
@@ -39,6 +40,18 @@ modules:
         help: 1 when OneSync is enabled (info.json vars.onesync_enabled)
         path: '{ .vars.onesync_enabled }'
         allow_missing_key: true
+        valuetype: gauge
+    http_client_config:
+      follow_redirects: false
+
+  # GET the platform's version list for Linux servers -> {"recommended": "35245", ...}: the build
+  # number of the current Recommended server build, sent as a string that json_exporter reads as
+  # a number. Only this field is read.
+  fxserver_versions:
+    metrics:
+      - name: fxserver_recommended_build
+        help: Build number of the current Recommended server build (version list recommended)
+        path: '{ .recommended }'
         valuetype: gauge
     http_client_config:
       follow_redirects: false

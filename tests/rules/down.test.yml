@@ -1,0 +1,220 @@
+# promtool unit tests for FXServerDown and FXServerTargetDown (rules/fxserver.alerts.yml).
+#   promtool test rules tests/rules/down.test.yml   (scripts/check_promtool.sh runs all)
+#
+# One sample every 30 s, as the pack's exporter jobs scrape. The series carry the job, instance,
+# module and server labels of prometheus/scrape/fxserver.yml; the alerts must name the server
+# (and for FXServerTargetDown the job), never the instance. A failed scrape ends the target's
+# series with a staleness marker ("stale"), as Prometheus does.
+rule_files:
+  - ../../rules/fxserver.alerts.yml
+
+evaluation_interval: 30s
+
+tests:
+  - name: port closed fires FXServerDown after 2 minutes, and the failing scrapes stay quiet
+    # game-01 goes down at 5m30s: both probes fail, the /perf/ and JSON scrapes fail.
+    # game-02 stays up.
+    interval: 30s
+    input_series:
+      - series: >-
+          probe_success{job="fxserver_blackbox", instance="127.0.0.1:30120", module="tcp_connect", server="game-01"}
+        values: '1x10 0x30'
+      - series: >-
+          probe_success{job="fxserver_blackbox", instance="http://127.0.0.1:30120/info.json",
+          module="http_fxserver_info", server="game-01"}
+        values: '1x10 0x30'
+      - series: 'up{job="fxserver_blackbox", instance="127.0.0.1:30120", module="tcp_connect", server="game-01"}'
+        values: '1x40'
+      - series: >-
+          up{job="fxserver_blackbox", instance="http://127.0.0.1:30120/info.json", module="http_fxserver_info",
+          server="game-01"}
+        values: '1x40'
+      - series: 'up{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01"}'
+        values: '1x10 0x30'
+      - series: >-
+          up{job="fxserver_json", instance="http://127.0.0.1:30120/dynamic.json", module="fxserver_dynamic",
+          server="game-01"}
+        values: '1x10 0x30'
+      - series: >-
+          up{job="fxserver_json", instance="http://127.0.0.1:30120/info.json", module="fxserver_info", server="game-01"}
+        values: '1x10 0x30'
+      - series: >-
+          probe_success{job="fxserver_blackbox", instance="192.0.2.11:30120", module="tcp_connect", server="game-02"}
+        values: '1x40'
+      - series: >-
+          probe_success{job="fxserver_blackbox", instance="http://192.0.2.11:30120/info.json",
+          module="http_fxserver_info", server="game-02"}
+        values: '1x40'
+      - series: 'up{job="fxserver_perf", instance="192.0.2.11:30120", server="game-02"}'
+        values: '1x40'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: FXServerDown
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: FXServerDown
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: FXServerDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              server: game-01
+            exp_annotations:
+              summary: "Game server game-01 is down"
+              description: >-
+                For 2 minutes the game port of game-01 has refused TCP connections, or info.json has
+                not answered with 200. Players cannot join, and connected players have lost the
+                server.
+              runbook_url:
+                https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-fxserverdown
+      # The /perf/ and JSON scrapes of game-01 have failed for 14 minutes, but the server is
+      # down: that is FXServerDown's alert, not a monitoring problem.
+      - eval_time: 20m
+        alertname: FXServerTargetDown
+        exp_alerts: []
+
+  - name: info.json not answering while the port is open fires FXServerDown
+    interval: 30s
+    input_series:
+      - series: >-
+          probe_success{job="fxserver_blackbox", instance="127.0.0.1:30120", module="tcp_connect", server="game-01"}
+        values: '1x40'
+      - series: >-
+          probe_success{job="fxserver_blackbox", instance="http://127.0.0.1:30120/info.json",
+          module="http_fxserver_info", server="game-01"}
+        values: '1x10 0x30'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: FXServerDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              server: game-01
+            exp_annotations:
+              summary: "Game server game-01 is down"
+              description: >-
+                For 2 minutes the game port of game-01 has refused TCP connections, or info.json has
+                not answered with 200. Players cannot join, and connected players have lost the
+                server.
+              runbook_url:
+                https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-fxserverdown
+
+  - name: a restart of 90 seconds does not fire FXServerDown
+    # Down at 5m30s, 6m and 6m30s, back at 7m: pending for 1m30s.
+    interval: 30s
+    input_series:
+      - series: >-
+          probe_success{job="fxserver_blackbox", instance="127.0.0.1:30120", module="tcp_connect", server="game-01"}
+        values: '1x10 0x2 1x27'
+      - series: >-
+          probe_success{job="fxserver_blackbox", instance="http://127.0.0.1:30120/info.json",
+          module="http_fxserver_info", server="game-01"}
+        values: '1x10 0x2 1x27'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: FXServerDown
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: FXServerDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: FXServerDown
+        exp_alerts: []
+
+  - name: a failing /perf/ scrape of a running server fires FXServerTargetDown after 10 minutes
+    # For example a wrong password: the /perf/ scrape fails from 2m30s on, the probes succeed.
+    interval: 30s
+    input_series:
+      - series: >-
+          probe_success{job="fxserver_blackbox", instance="127.0.0.1:30120", module="tcp_connect", server="game-01"}
+        values: '1x60'
+      - series: >-
+          probe_success{job="fxserver_blackbox", instance="http://127.0.0.1:30120/info.json",
+          module="http_fxserver_info", server="game-01"}
+        values: '1x60'
+      - series: 'up{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01"}'
+        values: '1x4 0x56'
+      - series: >-
+          up{job="fxserver_json", instance="http://127.0.0.1:30120/dynamic.json", module="fxserver_dynamic",
+          server="game-01"}
+        values: '1x60'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: FXServerTargetDown
+        exp_alerts: []
+      - eval_time: 13m
+        alertname: FXServerTargetDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              server: game-01
+              job: fxserver_perf
+            exp_annotations:
+              summary: "Job fxserver_perf cannot scrape game server game-01"
+              description: >-
+                For 10 minutes Prometheus has not been able to scrape at least one target of the job
+                fxserver_perf for game-01, while the probes do not report the server as down. The
+                series of that target are missing, so other alerts for this server may not fire.
+              runbook_url:
+                https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-fxservertargetdown
+      - eval_time: 13m
+        alertname: FXServerDown
+        exp_alerts: []
+
+  - name: a stopped blackbox_exporter fires FXServerTargetDown, not FXServerDown
+    # The blackbox scrapes fail from 2m30s on, so the probe series end (stale); the server's own
+    # /perf/ scrape keeps working.
+    interval: 30s
+    input_series:
+      - series: 'up{job="fxserver_blackbox", instance="127.0.0.1:30120", module="tcp_connect", server="game-01"}'
+        values: '1x4 0x56'
+      - series: >-
+          up{job="fxserver_blackbox", instance="http://127.0.0.1:30120/info.json", module="http_fxserver_info",
+          server="game-01"}
+        values: '1x4 0x56'
+      - series: >-
+          probe_success{job="fxserver_blackbox", instance="127.0.0.1:30120", module="tcp_connect", server="game-01"}
+        values: '1x4 stale'
+      - series: >-
+          probe_success{job="fxserver_blackbox", instance="http://127.0.0.1:30120/info.json",
+          module="http_fxserver_info", server="game-01"}
+        values: '1x4 stale'
+      - series: 'up{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01"}'
+        values: '1x60'
+    alert_rule_test:
+      - eval_time: 13m
+        alertname: FXServerTargetDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              server: game-01
+              job: fxserver_blackbox
+            exp_annotations:
+              summary: "Job fxserver_blackbox cannot scrape game server game-01"
+              description: >-
+                For 10 minutes Prometheus has not been able to scrape at least one target of the job
+                fxserver_blackbox for game-01, while the probes do not report the server as down.
+                The series of that target are missing, so other alerts for this server may not
+                fire.
+              runbook_url:
+                https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-fxservertargetdown
+      - eval_time: 13m
+        alertname: FXServerDown
+        exp_alerts: []
+
+  - name: a scrape gap of 5 minutes does not fire FXServerTargetDown
+    interval: 30s
+    input_series:
+      - series: >-
+          probe_success{job="fxserver_blackbox", instance="127.0.0.1:30120", module="tcp_connect", server="game-01"}
+        values: '1x60'
+      - series: 'up{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01"}'
+        values: '1x4 0x9 1x46'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: FXServerTargetDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: FXServerTargetDown
+        exp_alerts: []

@@ -1,0 +1,100 @@
+# promtool unit tests for MariaDBDown and MariaDBSlowQueries (rules/mariadb.alerts.yml).
+#   promtool test rules tests/rules/mariadb.test.yml   (scripts/check_promtool.sh runs all)
+#
+# The series carry the labels of a mysqld_exporter job with the server label of the game server
+# (docs/configuration.md#host-and-database-jobs).
+rule_files:
+  - ../../rules/mariadb.alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a database that stays down fires MariaDBDown after 2 minutes
+    # mysql_up is 0 from minute 6 on; game-02's database stays up.
+    interval: 1m
+    input_series:
+      - series: 'mysql_up{job="mysqld", instance="127.0.0.1:9104", server="game-01"}'
+        values: '1x5 0x15'
+      - series: 'mysql_up{job="mysqld", instance="192.0.2.11:9104", server="game-02"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: MariaDBDown
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: MariaDBDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              server: game-01
+            exp_annotations:
+              summary: "MariaDB of game server game-01 is down"
+              description: >-
+                For 2 minutes mysqld_exporter has not been able to connect to the database of
+                game-01 or to query it (mysql_up is 0). Resources that keep their data in it cannot
+                load or save it.
+              runbook_url:
+                https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-mariadbdown
+
+  - name: a database restart of one minute does not fire MariaDBDown
+    interval: 1m
+    input_series:
+      - series: 'mysql_up{job="mysqld", instance="127.0.0.1:9104", server="game-01"}'
+        values: '1x5 0 1x14'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: MariaDBDown
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: MariaDBDown
+        exp_alerts: []
+
+  - name: three slow queries a minute fire MariaDBSlowQueries after 10 minutes
+    # The counter grows by 3 a minute from the start: the 5-minute rate is 3 a minute.
+    interval: 1m
+    input_series:
+      - series: 'mysql_global_status_slow_queries{job="mysqld", instance="127.0.0.1:9104", server="game-01"}'
+        values: '0+3x30'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MariaDBSlowQueries
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: MariaDBSlowQueries
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              server: game-01
+            exp_annotations:
+              summary: "MariaDB of game server game-01 runs slow queries"
+              description: >-
+                For 10 minutes the database of game-01 has run 3.0 slow queries a minute (more than
+                1), each longer than its long_query_time. Resources that wait for these queries
+                respond late.
+              runbook_url:
+                https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-mariadbslowqueries
+
+  - name: one slow query every two minutes does not fire MariaDBSlowQueries
+    interval: 1m
+    input_series:
+      - series: 'mysql_global_status_slow_queries{job="mysqld", instance="127.0.0.1:9104", server="game-01"}'
+        values: '0 0 1 1 2 2 3 3 4 4 5 5 6 6 7 7 8 8 9 9 10 10 11 11 12 12 13 13 14 14 15'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: MariaDBSlowQueries
+        exp_alerts: []
+
+  - name: a short burst of slow queries does not fire MariaDBSlowQueries
+    # 20 slow queries in one minute, then none: the 5-minute rate is above 1 a minute for about
+    # 5 minutes, less than the 10 the alert waits.
+    interval: 1m
+    input_series:
+      - series: 'mysql_global_status_slow_queries{job="mysqld", instance="127.0.0.1:9104", server="game-01"}'
+        values: '0x5 20x25'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: MariaDBSlowQueries
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: MariaDBSlowQueries
+        exp_alerts: []

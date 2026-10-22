@@ -1,0 +1,41 @@
+# Alerting rules for the game server's host, read from node_exporter's filesystem collector. This
+# pack ships no node_exporter job: scrape node_exporter on the game server's host with a job of
+# your own and give it the same server label as the pack's jobs
+# (docs/configuration.md#host-and-database-jobs).
+# Load every file of rules/ together, or leave this one out if you have host alerts of your own:
+#   rule_files: [/etc/prometheus/rules/*.yml]
+#
+# Every alert carries the labels server and severity and the annotations summary, description
+# and runbook_url (docs/adr/0015-alerts-per-game-server.md); docs/runbook.md has one section per
+# alert, and tests/rules/host.test.yml tests each one.
+groups:
+  - name: host-alerts
+    interval: 1m
+    rules:
+      # A writable filesystem has less than 15 % of its size available. Memory-backed and image
+      # filesystems are left out: they fill up by design or cannot be written. "Available" is
+      # what a process that is not root may still use, so the blocks reserved for root count as
+      # used and the percentage is a little higher than the one df shows.
+      - alert: HostDiskAlmostFull
+        expr: >-
+          max by (server, mountpoint) (
+            (
+              1
+              - node_filesystem_avail_bytes{fstype!~"tmpfs|ramfs|devtmpfs|overlay|squashfs|erofs|iso9660"}
+              / node_filesystem_size_bytes{fstype!~"tmpfs|ramfs|devtmpfs|overlay|squashfs|erofs|iso9660"}
+            )
+            and node_filesystem_readonly == 0
+          ) > 0.85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: >-
+            Disk {{ $labels.mountpoint }} on game server {{ $labels.server }} is
+            {{ $value | humanizePercentage }} full
+          description: >-
+            For 10 minutes less than 15 % of the filesystem at {{ $labels.mountpoint }} on
+            {{ $labels.server }} has been available. When it is full, the game server cannot write
+            its logs or save data, the database stops writing, and backups and build updates fail.
+          runbook_url:
+            https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-hostdiskalmostfull

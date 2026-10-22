@@ -1,0 +1,44 @@
+# Alerting rules for the game server's database (MariaDB, or MySQL), read from mysqld_exporter.
+# This pack ships no mysqld_exporter job: scrape mysqld_exporter with a job of your own and give
+# it the same server label as the pack's jobs (docs/configuration.md#host-and-database-jobs).
+# Load every file of rules/ together, or leave this one out if the server uses no database:
+#   rule_files: [/etc/prometheus/rules/*.yml]
+#
+# Every alert carries the labels server and severity and the annotations summary, description
+# and runbook_url (docs/adr/0015-alerts-per-game-server.md); docs/runbook.md has one section per
+# alert, and tests/rules/mariadb.test.yml tests each one.
+groups:
+  - name: mariadb-alerts
+    interval: 1m
+    rules:
+      # mysqld_exporter answers, but cannot connect to the database or query it.
+      - alert: MariaDBDown
+        expr: max by (server) (mysql_up) == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MariaDB of game server {{ $labels.server }} is down"
+          description: >-
+            For 2 minutes mysqld_exporter has not been able to connect to the database of
+            {{ $labels.server }} or to query it (mysql_up is 0). Resources that keep their data in
+            it cannot load or save it.
+          runbook_url:
+            https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-mariadbdown
+
+      # More than one slow query a minute, averaged over 5 minutes, for 10 minutes. A query is
+      # slow when it runs longer than long_query_time (10 s by default); the counter counts them
+      # even when the slow query log is off.
+      - alert: MariaDBSlowQueries
+        expr: sum by (server) (rate(mysql_global_status_slow_queries[5m])) * 60 > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MariaDB of game server {{ $labels.server }} runs slow queries"
+          description: >-
+            For 10 minutes the database of {{ $labels.server }} has run
+            {{ printf "%.1f" $value }} slow queries a minute (more than 1), each longer than its
+            long_query_time. Resources that wait for these queries respond late.
+          runbook_url:
+            https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-mariadbslowqueries

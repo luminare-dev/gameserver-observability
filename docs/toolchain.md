@@ -88,7 +88,8 @@ request and installed with `--require-hashes`.
   `ci.yml` and this page disagree, when the `exporters` job uses another Prometheus than the
   `promtool` job, and when the gitleaks pin in `scripts/test.sh`, the defaults in
   `reusable-gitleaks.yml` and this page disagree. After bumping an exporter, run
-  `scripts/smoke_exporters.py` and check the [metrics reference](metrics.md) against its output.
+  `scripts/smoke_exporters.py` and check the [metrics reference](metrics.md) against its output;
+  after bumping Prometheus and promtool, run `bash scripts/check_promtool.sh` as well.
 - The `python:3.12-slim` digest above: before recompiling `requirements-test.txt` by hand, read
   the current digest with `docker buildx imagetools inspect python:3.12-slim` and update the
   command and its date (Dependabot recompiles the file in its own environment).

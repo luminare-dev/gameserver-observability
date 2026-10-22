@@ -1,0 +1,30 @@
+# Recording rules for the game server's tick-time histogram (FXServer /perf/, renamed to
+# fxserver_tick_time_seconds_* by prometheus/scrape/fxserver.yml). Load every file of rules/
+# together; the alert FXServerTickTimeHigh in fxserver.alerts.yml reads the p95 series:
+#   rule_files: [/etc/prometheus/rules/*.yml]
+#
+# One series per server and thread (svMain, svNetwork, svSync), named level:metric:operations
+# as the Prometheus documentation recommends. The windows are one minute long, so a short spike
+# stays visible and the alert's "for: 5m" means five minutes of slow ticks; that needs at least
+# two /perf/ scrapes per minute (the pack scrapes every 15 s). docs/metrics.md lists the series,
+# tests/rules/recording.test.yml tests each one, and docs/adr/0014-tick-time-over-one-minute-windows.md
+# explains the windows and the names.
+groups:
+  - name: fxserver-tick-time
+    interval: 30s
+    rules:
+      # 95th and 99th percentile of the tick time. The histogram's buckets end at 0.25 s, so a
+      # percentile that falls among slower ticks reads 0.25.
+      - record: server_thread:fxserver_tick_time_seconds:p95_1m
+        expr: histogram_quantile(0.95, sum by (server, thread, le) (rate(fxserver_tick_time_seconds_bucket[1m])))
+      - record: server_thread:fxserver_tick_time_seconds:p99_1m
+        expr: histogram_quantile(0.99, sum by (server, thread, le) (rate(fxserver_tick_time_seconds_bucket[1m])))
+
+      # Mean tick time and ticks per second. svMain runs a tick every 50 ms (20 per second)
+      # while each tick takes less than that; slower ticks lower the rate.
+      - record: server_thread:fxserver_tick_time_seconds:mean1m
+        expr: >-
+          sum by (server, thread) (rate(fxserver_tick_time_seconds_sum[1m]))
+          / sum by (server, thread) (rate(fxserver_tick_time_seconds_count[1m]))
+      - record: server_thread:fxserver_tick_time_seconds_count:rate1m
+        expr: sum by (server, thread) (rate(fxserver_tick_time_seconds_count[1m]))

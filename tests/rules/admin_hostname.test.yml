@@ -1,0 +1,120 @@
+# promtool unit tests for FXServerAdminHostnameUnprotected and FXServerAdminHostnameProbeFailing
+# (rules/fxserver.alerts.yml), which read the optional job fxserver_tunnel
+# (prometheus/scrape/tunnel.yml).
+#   promtool test rules tests/rules/admin_hostname.test.yml   (scripts/check_promtool.sh runs all)
+#
+# The probe http_access_protected requests the admin hostname without a login every 60 s and
+# succeeds on 302, 303 or 403 over HTTPS: the access proxy redirects to its login page or
+# refuses.
+rule_files:
+  - ../../rules/fxserver.alerts.yml
+
+evaluation_interval: 30s
+
+tests:
+  - name: the admin page answering 200 without a login fires FXServerAdminHostnameUnprotected
+    # From minute 6 the hostname answers 200: the access protection is gone.
+    interval: 1m
+    input_series:
+      - series: >-
+          probe_http_status_code{job="fxserver_tunnel", instance="https://demo-tx.example.com/",
+          module="http_access_protected", server="game-01"}
+        values: '302x5 200x30'
+      - series: >-
+          probe_success{job="fxserver_tunnel", instance="https://demo-tx.example.com/", module="http_access_protected",
+          server="game-01"}
+        values: '1x5 0x30'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: FXServerAdminHostnameUnprotected
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: FXServerAdminHostnameUnprotected
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              server: game-01
+            exp_annotations:
+              summary: "The admin hostname of game server game-01 answers without a login"
+              description: >-
+                For 5 minutes the admin hostname of game-01 has answered a request without a login
+                with HTTP 200 instead of a redirect to the login page or a refusal. The access
+                protection in front of the admin interface is missing.
+              runbook_url:
+                https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-fxserveradminhostnameunprotected
+      # The failed probe is reported once, as the more urgent alert.
+      - eval_time: 20m
+        alertname: FXServerAdminHostnameProbeFailing
+        exp_alerts: []
+
+  - name: a 502 from the tunnel fires FXServerAdminHostnameProbeFailing after 10 minutes
+    # From minute 6 the tunnel answers 502 (its connector cannot reach the admin interface).
+    interval: 1m
+    input_series:
+      - series: >-
+          probe_http_status_code{job="fxserver_tunnel", instance="https://demo-tx.example.com/",
+          module="http_access_protected", server="game-01"}
+        values: '302x5 502x30'
+      - series: >-
+          probe_success{job="fxserver_tunnel", instance="https://demo-tx.example.com/", module="http_access_protected",
+          server="game-01"}
+        values: '1x5 0x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: FXServerAdminHostnameProbeFailing
+        exp_alerts: []
+      - eval_time: 17m
+        alertname: FXServerAdminHostnameProbeFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              server: game-01
+            exp_annotations:
+              summary: "The admin hostname probe of game server game-01 fails"
+              description: >-
+                For 10 minutes the admin hostname of game-01 has not answered over HTTPS with a
+                redirect to the login page or a refusal (302, 303 or 403). The tunnel, the hostname
+                or its certificate may be broken, so admins cannot reach the admin interface.
+              runbook_url:
+                https://github.com/luminare-dev/gameserver-observability/blob/main/docs/runbook.md#alert-fxserveradminhostnameprobefailing
+      - eval_time: 20m
+        alertname: FXServerAdminHostnameUnprotected
+        exp_alerts: []
+
+  - name: a redirect or a refusal without a login fires neither alert
+    interval: 1m
+    input_series:
+      - series: >-
+          probe_http_status_code{job="fxserver_tunnel", instance="https://demo-tx.example.com/",
+          module="http_access_protected", server="game-01"}
+        values: '302x15 403x15'
+      - series: >-
+          probe_success{job="fxserver_tunnel", instance="https://demo-tx.example.com/", module="http_access_protected",
+          server="game-01"}
+        values: '1x30'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: FXServerAdminHostnameUnprotected
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: FXServerAdminHostnameProbeFailing
+        exp_alerts: []
+
+  - name: a tunnel outage of 4 minutes does not fire
+    interval: 1m
+    input_series:
+      - series: >-
+          probe_http_status_code{job="fxserver_tunnel", instance="https://demo-tx.example.com/",
+          module="http_access_protected", server="game-01"}
+        values: '302x5 502x4 302x20'
+      - series: >-
+          probe_success{job="fxserver_tunnel", instance="https://demo-tx.example.com/", module="http_access_protected",
+          server="game-01"}
+        values: '1x5 0x4 1x20'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: FXServerAdminHostnameProbeFailing
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: FXServerAdminHostnameProbeFailing
+        exp_alerts: []

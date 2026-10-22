@@ -5,13 +5,16 @@
 #
 #   bash scripts/check_promtool.sh
 #
-#   rules/*.yml, rules/*.yaml   promtool check rules (syntax, PromQL, duplicate rules)
+#   rules/*.yml, rules/*.yaml   promtool check rules with every lint check, lint findings fatal
+#                               (syntax, PromQL, templates, duplicate rules)
 #   tests/rules/*.test.yml      promtool test rules (unit tests with input series and expected
-#   (and *.test.yaml)           alerts)
+#   (and *.test.yaml)           alerts, annotations and recorded values)
 #
-# The check fails when rules/ has rule files but tests/rules/ has no rule test at all. That every
-# rule file is named in the rule_files of at least one rule test is checked by RuleCoverageTest in
-# tests/test_pack_repo.py, which runs in ci / lint-test (scripts/test.sh).
+# The check fails when rules/ has rule files but tests/rules/ has no rule test at all. What
+# promtool cannot see is checked by the unit tests in ci / lint-test (scripts/test.sh):
+# RuleCoverageTest in tests/test_pack_repo.py (every rule file is named in the rule_files of a
+# rule test) and tests/test_rules.py (every alert has a firing and a quiet case, labels,
+# annotations, a runbook section, and so on).
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -25,7 +28,7 @@ tests=(tests/rules/*.test.yml tests/rules/*.test.yaml)
 if [ "${#rules[@]}" -eq 0 ]; then
   echo "rules/: no rule files to check"
 else
-  promtool check rules "${rules[@]}"
+  promtool check rules --lint=all --lint-fatal "${rules[@]}"
 fi
 
 if [ "${#tests[@]}" -eq 0 ]; then

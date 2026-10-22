@@ -29,10 +29,10 @@ JSON (`info.json`, `dynamic.json`) on the game port. Turning them into alerts an
 usually means writing scrape configs, PromQL and panels by hand, and it is easy to collect more
 than needed, such as player names or identifiers. This pack does it from outside the server
 process, with no resource running inside the game server and with player counts only. The
-repository holds the scrape jobs, the json_exporter and blackbox_exporter modules, a reference of
-every metric with how far it is verified, and a fake server that CI scrapes through the real
-exporters; the recording and alerting rules and the dashboards are not in it yet (see
-[Limitations](#limitations)).
+repository holds the scrape jobs, the json_exporter and blackbox_exporter modules, recording rules
+and twelve alerts with a runbook section each, a reference of every metric with how far it is
+verified, and a fake server that CI scrapes through the real exporters; the dashboards are not in
+it yet (see [Limitations](#limitations)).
 
 ## Quickstart
 
@@ -42,18 +42,18 @@ if an exporter already has one, merge this pack's modules into it instead
 ([Install](docs/install.md#install)):
 
 ```bash
-git clone https://github.com/luminare-dev/gameserver-observability.git
-cd gameserver-observability
+git clone https://github.com/luminare-dev/gameserver-observability.git && cd gameserver-observability
 sudo install -D -m 0644 prometheus/scrape/fxserver.yml /etc/prometheus/scrape/fxserver.yml
+sudo install -D -m 0644 -t /etc/prometheus/rules rules/*.yml
 test -e /etc/json_exporter/config.yml || sudo install -D -m 0644 json_exporter/config.yml /etc/json_exporter/config.yml
 test -e /etc/blackbox_exporter/blackbox.yml || sudo install -D -m 0644 blackbox/blackbox.yml /etc/blackbox_exporter/blackbox.yml
 ```
 
 Then set the targets and the `server` label in the scrape jobs, include them with
-`scrape_config_files`, set `sv_prometheusBasicAuthUser` and `sv_prometheusBasicAuthPassword` on the
-game server and write the password into `/etc/prometheus/secrets/fxserver_perf`
-([Configuration](docs/configuration.md)). There is no release yet; once there is, check out its
-tag instead of `main`.
+`scrape_config_files` and the rules with `rule_files`, set `sv_prometheusBasicAuthUser` and
+`sv_prometheusBasicAuthPassword` on the game server and write the password into
+`/etc/prometheus/secrets/fxserver_perf` ([Configuration](docs/configuration.md)). There is no
+release yet; once there is, check out its tag instead of `main`.
 
 ## How it works
 
@@ -61,17 +61,21 @@ tag instead of `main`.
 flowchart LR
     subgraph game["Game server host"]
         fx["FXServer, port 30120<br/>/perf/, info.json, dynamic.json"]
+        node["node_exporter, mysqld_exporter<br/>(your own jobs)"]
     end
     subgraph mon["Prometheus host, exporters on 127.0.0.1"]
-        prom["Prometheus<br/>prometheus/scrape/fxserver.yml"]
+        prom["Prometheus<br/>prometheus/scrape/*.yml<br/>rules/*.yml"]
         je["json_exporter :7979<br/>json_exporter/config.yml"]
         bb["blackbox_exporter :9115<br/>blackbox/blackbox.yml"]
     end
+    list["Version list<br/>(optional, public)"]
     prom -- "GET /perf/ with basic auth<br/>tickTime renamed to fxserver_tick_time_seconds" --> fx
     prom -- "/probe" --> je
     je -- "GET dynamic.json, info.json<br/>counts, slots, version; never players.json" --> fx
+    je -- "Recommended build" --> list
     prom -- "/probe" --> bb
     bb -- "TCP 30120, GET info.json,<br/>GET /perf/ must answer 401" --> fx
+    prom -- "disk, build textfile, database" --> node
 ```
 
 Prometheus scrapes `/perf/` itself, keeps only the tick-time histogram and renames it with a
@@ -80,13 +84,35 @@ the JSON endpoints and the probes it asks json_exporter and blackbox_exporter, w
 server's URLs per scrape. Nothing runs inside the server process, and no series or label holds
 data about a single player ([ADR 0009](docs/adr/0009-counts-only-from-the-status-endpoints.md)).
 [Metrics reference](docs/metrics.md) lists every series and its source,
-[cardinality budget](docs/cardinality.md) what it costs: 129 series per game server.
+[cardinality budget](docs/cardinality.md) what it costs: 129 series per game server, plus 12
+recorded ones.
+
+The rules in `rules/` record the tick time's 95th and 99th percentile, mean and rate per server
+and thread over one-minute windows
+([ADR 0014](docs/adr/0014-tick-time-over-one-minute-windows.md)), and define twelve alerts, each
+named by the game server's `server` label, with a severity and a link to its
+[runbook](docs/runbook.md) section ([ADR 0015](docs/adr/0015-alerts-per-game-server.md)):
+
+| Alert | Fires when |
+|---|---|
+| `FXServerTickTimeHigh` | `svMain` p95 above 50 ms for 5 minutes |
+| `FXServerDown` | the game port or `info.json` does not answer for 2 minutes |
+| `FXServerTargetDown` | a scrape of a running server fails for 10 minutes |
+| `FXServerNoPlayersAfterRestart` | 0 players 30 minutes after a restart that players did not come back from ([ADR 0016](docs/adr/0016-restarts-from-tick-counter-resets.md)) |
+| `FXServerPerfEndpointExposed` | `/perf/` answers without credentials |
+| `FXServerAdminHostnameUnprotected`, `FXServerAdminHostnameProbeFailing` | the optional admin hostname probe sees no access protection, or fails |
+| `FXServerArtifactOld`, `FXServerBuildBehindRecommended` | the build was switched on more than 8 weeks ago, or is older than the Recommended build of the last 14 days ([ADR 0017](docs/adr/0017-build-age-and-the-recommended-build.md)) |
+| `HostDiskAlmostFull` | a disk is more than 85 % full |
+| `MariaDBDown`, `MariaDBSlowQueries` | the database is down, or runs more than one slow query a minute |
 
 Every pull request runs, besides the template's checks: the unit tests (including the fake
-server and the pack check) in `ci / lint-test`; `promtool check config` and the privacy rules on
-the configs in the `promtool` job ([ADR 0011](docs/adr/0011-pack-check-in-standard-library-python.md));
-and in the `exporters` job the pinned Prometheus, json_exporter and blackbox_exporter against the
-fake server, checking names, labels, values and that `players.json` is never requested
+server, the pack check and the shape of every rule) in `ci / lint-test`; `promtool check rules`,
+the promtool rule tests (a case where each alert fires and one where it must stay quiet),
+`promtool check config` and the privacy rules on the configs in the `promtool` job
+([ADR 0011](docs/adr/0011-pack-check-in-standard-library-python.md)); and in the `exporters` job
+the pinned Prometheus, json_exporter and blackbox_exporter with the configs and the rules against
+the fake server, checking names, labels, values, that `players.json` is never requested, and that
+a tick-time spike and a stopped server raise the right alerts
 ([ADR 0012](docs/adr/0012-test-the-configs-against-a-fake-server.md)). Merging the release pull
 request tags the version and publishes a `git archive` of the tag with `SHA256SUMS`
 ([ADR 0005](docs/adr/0005-pack-layout-and-release-archive.md)).
@@ -95,12 +121,13 @@ What is in the repository today:
 
 | Path | Content |
 |---|---|
-| `prometheus/scrape/` | `fxserver.yml` (jobs `fxserver_perf`, `fxserver_json`, `fxserver_blackbox`) and the optional `tunnel.yml` (`fxserver_tunnel`) |
+| `prometheus/scrape/` | `fxserver.yml` (jobs `fxserver_perf`, `fxserver_json`, `fxserver_blackbox`) and the optional `tunnel.yml` (`fxserver_tunnel`) and `versions.yml` (`fxserver_versions`) |
 | `json_exporter/`, `blackbox/` | the exporter modules |
+| `rules/` | the recording rules and the alerts, in five files by the data they need |
 | `demo/fake-fxserver/` | the fake game server: synthetic data, basic auth on `/perf/`, a load knob for tick-time spikes |
-| `scripts/` | `check_pack.py` (config checks), `smoke_exporters.py` (end-to-end run), `test.sh` (the test command), `check_promtool.sh` (rule checks), and the template's checks for wording, names, byline, workflow pins and the release archive |
-| `tests/` | unit tests for the fake server, the pack check, the scripts and this repository's setup |
-| `docs/` | metrics reference, cardinality budget, installation, configuration, upgrade, troubleshooting, runbook, toolchain pins and the ADRs |
+| `scripts/` | `check_pack.py` (config checks), `smoke_exporters.py` (end-to-end run), `test.sh` (the test command), `check_promtool.sh` (rule checks and rule tests), and the template's checks for wording, names, byline, workflow pins and the release archive |
+| `tests/` | unit tests for the fake server, the pack check, the rules, the scripts and this repository's setup; `tests/rules/` holds the promtool rule tests |
+| `docs/` | metrics reference, cardinality budget, installation, configuration, upgrade, troubleshooting, runbook (a section per alert), toolchain pins and the ADRs |
 | `.github/workflows/` | CI (`ci.yml` with the `promtool` and `exporters` jobs), secret scan, pull request title check, release, OpenSSF Scorecard |
 
 ## Design decisions
@@ -129,6 +156,14 @@ The decisions behind this project are recorded as short ADRs in [docs/adr/](docs
   (why the real exporters against a fake instead of recorded files or config checks alone)
 - [ADR 0013: Probed target in the instance label](docs/adr/0013-probed-target-in-the-instance-label.md)
   (why the probed URL or address instead of a fixed alias, and what shared views must leave out)
+- [ADR 0014: Tick time over one-minute windows](docs/adr/0014-tick-time-over-one-minute-windows.md)
+  (why one-minute instead of five-minute windows for the recorded percentiles, and their names)
+- [ADR 0015: Alerts per game server](docs/adr/0015-alerts-per-game-server.md)
+  (why alerts name the `server` label instead of keeping the source labels, and the two severities)
+- [ADR 0016: Restarts from tick counter resets](docs/adr/0016-restarts-from-tick-counter-resets.md)
+  (why the reset of the tick counter instead of a scrape gap or any empty period)
+- [ADR 0017: Build age and the Recommended build](docs/adr/0017-build-age-and-the-recommended-build.md)
+  (why the switch time and the public version list instead of release dates)
 
 ## Supported versions
 
@@ -138,7 +173,8 @@ The decisions behind this project are recorded as short ADRs in [docs/adr/](docs
 | json_exporter | 0.8.0 | 0.8.0 (module format of that release) |
 | blackbox_exporter | 0.29.0 | 0.29.0 |
 | FXServer | build 35245, read in its source code; not yet run against a live server | the endpoints of build 35245 |
-| promtool (rule checks in CI) | 3.15.0 | 3.15.0 (pinned in `ci.yml`) |
+| promtool (rule checks and rule tests in CI) | 3.15.0 | 3.15.0 (pinned in `ci.yml`) |
+| node_exporter, mysqld_exporter (host, build and database alerts) | not run here; the rules are tested with promtool on the documented metric names | the versions you run, scraped by your own jobs |
 | Python (scripts, fake server and tests) | 3.10.22, 3.12.15, 3.14.3 | 3.10 or newer |
 
 Fixes go into the latest minor release only. See the
@@ -146,8 +182,16 @@ Fixes go into the latest minor release only. See the
 
 ## Limitations
 
-- No recording or alerting rules, dashboards or demo stack yet. The `promtool` job and the release
-  archive are set up for rules; today the job finds no rule files and says so.
+- No dashboards or demo stack yet, and no Alertmanager configuration: the alerts are evaluated
+  and shown in Prometheus, and routing them is left to your Alertmanager.
+- The host, build and database alerts read node_exporter and mysqld_exporter, which this pack does
+  not ship or run in its tests; their rules are tested with promtool only. The build alerts need
+  the textfile metrics of the `luminare.gameserver` collection's `fxserver` role (or a file of
+  the same shape), and `FXServerBuildBehindRecommended` the optional version list job, which no
+  alert watches itself.
+- The end-to-end run checks the rules on live data for a healthy server, a tick-time spike and a
+  stopped server. Every other firing case, among them the alerts with long windows (no players
+  after a restart, the build alerts), is tested with promtool only.
 - Nothing has been run against a real FXServer; that needs a server with a license key. The
   fields, buckets and access rules were read in the source code of build 35245 and tested against
   the fake server. Not verified on a live server: the exact version string (and so the `build`
@@ -166,16 +210,18 @@ Fixes go into the latest minor release only. See the
 
 | What | Value | How it was measured |
 |---|---|---|
-| End-to-end run | all 20 checks passed in 34 s: 6 of 6 targets up, the 7 documented `fxserver_*` metrics with the fake server's values, no `players.json` request | `python3 -I scripts/smoke_exporters.py` with Prometheus 3.15.0, json_exporter 0.8.0 and blackbox_exporter 0.29.0 installed by the steps of the `exporters` job, in a `python:3.12-slim` container (the runner's Python) without network, 2026-10-21 |
-| Broken configs caught | 2 of 2 | `scripts/smoke_exporters.py` on two changed copies of the configs, in a `python:3.13-slim` container: without the `labeldrop` of `name` (3 checks failed) and with a wrong json_exporter path (2 checks failed), 2026-10-21 |
-| Series per game server | 129 (99 samples per scrape round and 30 per-target series) | `scrape_samples_post_metric_relabeling` in the end-to-end run ([cardinality budget](docs/cardinality.md)), 2026-10-21 |
-| Pack check | 0 findings in 4 files; `promtool check config --lint=all` passed for 2 files | `python3 scripts/check_pack.py --require-promtool` with promtool 3.15.0, 2026-10-21 |
+| End-to-end run | all 33 checks passed in 187 s: 7 of 7 targets up, the 8 documented `fxserver_*` metrics with the fake server's and the synthetic version list's values, no `players.json` request, all 5 rule files loaded and every rule evaluated without an error, the 4 recorded series per thread, no alert while healthy, `FXServerTickTimeHigh` pending 32 s after a 90 ms spike, `FXServerDown` pending 30 s after the fake server stopped while `FXServerTargetDown` stayed quiet | `python3 -I scripts/smoke_exporters.py` with Prometheus 3.15.0, json_exporter 0.8.0 and blackbox_exporter 0.29.0 installed by the steps of the `exporters` job, in a `python:3.12-slim` container (the runner's Python) without network, 2026-10-21 |
+| Broken configs and rules caught | 4 of 4 | `scripts/smoke_exporters.py` on four changed copies, in a `python:3.13-slim` container: without the `labeldrop` of `name` (3 checks failed), with a wrong json_exporter path (2 failed), `FXServerDown` with wrong module names (1 failed: never pending) and `FXServerTargetDown` without its `unless` clause (1 failed: pending while the server was down), 2026-10-21 |
+| Rule tests | 82 cases in 39 test groups passed: every one of the 12 alerts fires in at least one (19 in all) and stays quiet in at least three (63 in all); 11 checks of recorded values | `bash scripts/check_promtool.sh` with promtool 3.15.0 (`promtool check rules --lint=all --lint-fatal`: 16 rules in 5 files, then `promtool test rules` on 9 files), 2026-10-21 |
+| Series per game server | 129 (99 samples per scrape round and 30 per-target series), plus 12 recorded series | `scrape_samples_post_metric_relabeling` and the recorded series in the end-to-end run ([cardinality budget](docs/cardinality.md)), 2026-10-21 |
+| Version list module | `fxserver_recommended_build` 35245, the Recommended build listed that day | json_exporter 0.8.0 with `json_exporter/config.yml`, module `fxserver_versions`, against the real version list, 2026-10-21 |
+| Pack check | 0 findings in 5 files; `promtool check config --lint=all` passed for 3 files | `python3 scripts/check_pack.py --require-promtool` with promtool 3.15.0, 2026-10-21 |
 | YAML reader against PyYAML | 0 files read differently out of 214 (52 read alike, 162 refused) | the reader of `scripts/check_pack.py` and PyYAML 6.0.3 on the YAML files of this project's repositories and of installed Python packages, 2026-10-21 |
-| Installation steps | 6 of 6 targets up | the commands of [Installation](docs/install.md) as root in a `python:3.13-slim` container against the fake server, 2026-10-21 |
-| Unit tests | 187 run, 0 failed, 1 skipped; 25 for the fake server, 38 for the pack check, 27 for this repository's setup | `bash scripts/test.sh` with gitleaks 8.30.1, markdownlint-cli2 0.23.2 and promtool 3.15.0 on the `PATH`, Python 3.14.3, 2026-10-21 (the skipped test applies only to the template repository) |
-| Unit tests, CI mode | 187 run, 0 failed, 3 skipped | `CI=true bash scripts/test.sh` without gitleaks, markdownlint-cli2 and promtool on the `PATH`, Python 3.14.3, 2026-10-21: the script downloaded gitleaks 8.30.1 and checked its sha256, so the secret-rule tests ran |
-| Unit tests, other Pythons | 187 run, 0 failed, 11 skipped on each | `bash scripts/test.sh` on Python 3.10.22 and 3.12.15 (`python:3.10-slim`, `python:3.12-slim` plus git, without gitleaks, markdownlint-cli2 and promtool), 2026-10-21 |
-| Secret scan | 0 leaks in 3 commits | `gitleaks git --redact --config .gitleaks.toml .`, gitleaks 8.30.1, 2026-10-21 |
+| Installation steps | 7 of 7 targets up, 5 rule groups evaluated without an error, no alert active | the commands of [Installation](docs/install.md), with the optional version list job, as root in a `python:3.13-slim` container against the fake server, 2026-10-21 |
+| Unit tests | 209 run, 0 failed, 1 skipped; 25 for the fake server, 38 for the pack check, 30 for this repository's setup, 19 for the rules | `bash scripts/test.sh` with gitleaks 8.30.1, markdownlint-cli2 0.23.2 and promtool 3.15.0 on the `PATH`, Python 3.14.3, 2026-10-21 (the skipped test applies only to the template repository) |
+| Unit tests, CI mode | 209 run, 0 failed, 3 skipped | `CI=true bash scripts/test.sh` without gitleaks, markdownlint-cli2 and promtool on the `PATH`, Python 3.14.3, 2026-10-21: the script downloaded gitleaks 8.30.1 and checked its sha256, so the secret-rule tests ran |
+| Unit tests, other Pythons | 209 run, 0 failed, 11 skipped on each | `bash scripts/test.sh` on Python 3.10.22 and 3.12.15 (`python:3.10-slim`, `python:3.12-slim` plus git, without gitleaks, markdownlint-cli2 and promtool), 2026-10-21 |
+| Secret scan | 0 leaks in 4 commits | `gitleaks git --redact --config .gitleaks.toml .`, gitleaks 8.30.1, 2026-10-21 |
 | Wording, name and placeholder check | 0 findings, 0 warnings | `python3 scripts/forbidden_words.py` in publish mode, 2026-10-21 |
 
 ## Documentation and links

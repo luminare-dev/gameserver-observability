@@ -1,0 +1,198 @@
+# promtool unit tests for rules/fxserver.recording.yml: every recorded series per server and
+# thread, with values worked out by hand from the input histograms.
+#   promtool test rules tests/rules/recording.test.yml   (scripts/check_promtool.sh runs all)
+#
+# The input series carry the labels a scrape of prometheus/scrape/fxserver.yml gives them (job,
+# instance, server, thread, le); the results must keep only server and thread.
+#
+# The expressions round the results to a millionth: the rate extrapolation leaves floating-point
+# noise in the last digits (0.09400000000000003 instead of 0.094).
+rule_files:
+  - ../../rules/fxserver.recording.yml
+
+evaluation_interval: 30s
+
+tests:
+  - name: percentiles, mean and tick rate per thread
+    # One sample every 15 s, as the pack scrapes /perf/. Increase per 15 s:
+    #   svMain     300 ticks (20 per second): 150 up to 30 ms, 250 up to 50 ms, 285 up to 70 ms,
+    #              all 300 up to 100 ms; 15 s of tick time in all (mean 50 ms).
+    #              p95 = rank 285 of 300 = the top of the 70 ms bucket = 0.07
+    #              p99 = rank 297: 0.07 + 0.03 * (297 - 285) / (300 - 285) = 0.094
+    #   svNetwork  1500 ticks (100 per second), all up to 1 ms; 0.75 s in all (mean 0.5 ms).
+    #              p95 = 0.001 * 1425 / 1500 = 0.00095, p99 = 0.001 * 1485 / 1500 = 0.00099
+    #   svSync     1875 ticks (125 per second): 1500 up to 2 ms, all up to 4 ms; 3.75 s (mean 2 ms).
+    #              p95 = rank 1781.25: 0.002 + 0.002 * 281.25 / 375 = 0.0035
+    #              p99 = rank 1856.25: 0.002 + 0.002 * 356.25 / 375 = 0.0039
+    interval: 15s
+    input_series:
+      - series: >-
+          fxserver_tick_time_seconds_bucket{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svMain", le="0.03"}
+        values: '0+150x60'
+      - series: >-
+          fxserver_tick_time_seconds_bucket{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svMain", le="0.05"}
+        values: '0+250x60'
+      - series: >-
+          fxserver_tick_time_seconds_bucket{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svMain", le="0.07"}
+        values: '0+285x60'
+      - series: >-
+          fxserver_tick_time_seconds_bucket{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svMain", le="0.1"}
+        values: '0+300x60'
+      - series: >-
+          fxserver_tick_time_seconds_bucket{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svMain", le="+Inf"}
+        values: '0+300x60'
+      - series: >-
+          fxserver_tick_time_seconds_sum{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svMain"}
+        values: '0+15x60'
+      - series: >-
+          fxserver_tick_time_seconds_count{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svMain"}
+        values: '0+300x60'
+      - series: >-
+          fxserver_tick_time_seconds_bucket{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svNetwork", le="0.001"}
+        values: '0+1500x60'
+      - series: >-
+          fxserver_tick_time_seconds_bucket{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svNetwork", le="+Inf"}
+        values: '0+1500x60'
+      - series: >-
+          fxserver_tick_time_seconds_sum{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svNetwork"}
+        values: '0+0.75x60'
+      - series: >-
+          fxserver_tick_time_seconds_count{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svNetwork"}
+        values: '0+1500x60'
+      - series: >-
+          fxserver_tick_time_seconds_bucket{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svSync", le="0.002"}
+        values: '0+1500x60'
+      - series: >-
+          fxserver_tick_time_seconds_bucket{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svSync", le="0.004"}
+        values: '0+1875x60'
+      - series: >-
+          fxserver_tick_time_seconds_bucket{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svSync", le="+Inf"}
+        values: '0+1875x60'
+      - series: >-
+          fxserver_tick_time_seconds_sum{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svSync"}
+        values: '0+3.75x60'
+      - series: >-
+          fxserver_tick_time_seconds_count{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svSync"}
+        values: '0+1875x60'
+    promql_expr_test:
+      - expr: round(server_thread:fxserver_tick_time_seconds:p95_1m, 0.000001)
+        eval_time: 10m
+        exp_samples:
+          - labels: '{server="game-01", thread="svMain"}'
+            value: 0.07
+          - labels: '{server="game-01", thread="svNetwork"}'
+            value: 0.00095
+          - labels: '{server="game-01", thread="svSync"}'
+            value: 0.0035
+      - expr: round(server_thread:fxserver_tick_time_seconds:p99_1m, 0.000001)
+        eval_time: 10m
+        exp_samples:
+          - labels: '{server="game-01", thread="svMain"}'
+            value: 0.094
+          - labels: '{server="game-01", thread="svNetwork"}'
+            value: 0.00099
+          - labels: '{server="game-01", thread="svSync"}'
+            value: 0.0039
+      - expr: round(server_thread:fxserver_tick_time_seconds:mean1m, 0.000001)
+        eval_time: 10m
+        exp_samples:
+          - labels: '{server="game-01", thread="svMain"}'
+            value: 0.05
+          - labels: '{server="game-01", thread="svNetwork"}'
+            value: 0.0005
+          - labels: '{server="game-01", thread="svSync"}'
+            value: 0.002
+      - expr: round(server_thread:fxserver_tick_time_seconds_count:rate1m, 0.000001)
+        eval_time: 10m
+        exp_samples:
+          - labels: '{server="game-01", thread="svMain"}'
+            value: 20
+          - labels: '{server="game-01", thread="svNetwork"}'
+            value: 100
+          - labels: '{server="game-01", thread="svSync"}'
+            value: 125
+
+  - name: two servers stay apart, and ticks slower than the last bucket read 0.25
+    # game-01: every svMain tick takes longer than 250 ms, the highest bucket bound below +Inf:
+    # histogram_quantile then returns that bound. 60 ticks per 15 s (4 per second), 22.5 s of
+    # tick time (mean 375 ms). game-02: all ticks up to 30 ms, 300 per 15 s.
+    #   p95 = 0.03 * 285 / 300 = 0.0285, p99 = 0.03 * 297 / 300 = 0.0297
+    interval: 15s
+    input_series:
+      - series: >-
+          fxserver_tick_time_seconds_bucket{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svMain", le="0.25"}
+        values: '0x60'
+      - series: >-
+          fxserver_tick_time_seconds_bucket{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svMain", le="+Inf"}
+        values: '0+60x60'
+      - series: >-
+          fxserver_tick_time_seconds_sum{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svMain"}
+        values: '0+22.5x60'
+      - series: >-
+          fxserver_tick_time_seconds_count{job="fxserver_perf", instance="127.0.0.1:30120", server="game-01",
+          thread="svMain"}
+        values: '0+60x60'
+      - series: >-
+          fxserver_tick_time_seconds_bucket{job="fxserver_perf", instance="192.0.2.11:30120", server="game-02",
+          thread="svMain", le="0.03"}
+        values: '0+300x60'
+      - series: >-
+          fxserver_tick_time_seconds_bucket{job="fxserver_perf", instance="192.0.2.11:30120", server="game-02",
+          thread="svMain", le="+Inf"}
+        values: '0+300x60'
+      - series: >-
+          fxserver_tick_time_seconds_sum{job="fxserver_perf", instance="192.0.2.11:30120", server="game-02",
+          thread="svMain"}
+        values: '0+3x60'
+      - series: >-
+          fxserver_tick_time_seconds_count{job="fxserver_perf", instance="192.0.2.11:30120", server="game-02",
+          thread="svMain"}
+        values: '0+300x60'
+    promql_expr_test:
+      - expr: round(server_thread:fxserver_tick_time_seconds:p95_1m, 0.000001)
+        eval_time: 10m
+        exp_samples:
+          - labels: '{server="game-01", thread="svMain"}'
+            value: 0.25
+          - labels: '{server="game-02", thread="svMain"}'
+            value: 0.0285
+      - expr: round(server_thread:fxserver_tick_time_seconds:p99_1m, 0.000001)
+        eval_time: 10m
+        exp_samples:
+          - labels: '{server="game-01", thread="svMain"}'
+            value: 0.25
+          - labels: '{server="game-02", thread="svMain"}'
+            value: 0.0297
+      - expr: round(server_thread:fxserver_tick_time_seconds:mean1m, 0.000001)
+        eval_time: 10m
+        exp_samples:
+          - labels: '{server="game-01", thread="svMain"}'
+            value: 0.375
+          - labels: '{server="game-02", thread="svMain"}'
+            value: 0.01
+      - expr: round(server_thread:fxserver_tick_time_seconds_count:rate1m, 0.000001)
+        eval_time: 10m
+        exp_samples:
+          - labels: '{server="game-01", thread="svMain"}'
+            value: 4
+          - labels: '{server="game-02", thread="svMain"}'
+            value: 20
