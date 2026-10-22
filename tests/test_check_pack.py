@@ -340,6 +340,16 @@ class CheckerTest(unittest.TestCase):
         self.assertTrue(any("prober must be one of" in f for f in found), found)
         self.assertTrue(any("empty.yml: [parse] scrape_configs must be a non-empty list" in f for f in found), found)
 
+    def test_a_main_config_includes_scrape_files_of_the_pack(self):
+        """The demo stack's main config lists no jobs; it includes the pack's scrape files."""
+        demo = "prometheus/prometheus.demo.yml"
+        self.edit(demo, "/etc/prometheus/scrape/fxserver.yml", "/etc/prometheus/scrape/fxserver-old.yml")
+        self.assert_finding("parse", "'/etc/prometheus/scrape/fxserver-old.yml' names no file of prometheus/scrape/")
+        self.edit(demo, "/etc/prometheus/scrape/fxserver-old.yml", "/etc/prometheus/scrape/*.yml")
+        self.assertEqual(self.findings(), [])
+        (self.root / demo).write_text("scrape_config_files: []\n", encoding="utf-8")
+        self.assert_finding("parse", "scrape_config_files must be a non-empty list of paths")
+
     def test_odd_shapes_are_findings_not_crashes(self):
         (self.root / "prometheus" / "scrape" / "odd.yml").write_text(
             "scrape_configs:\n  - job_name: odd\n    static_configs: {a: 1}\n    params: [x]\n"

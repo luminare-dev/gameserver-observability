@@ -141,6 +141,36 @@ other configs do.
 example `docker run --rm --network none -v "$PWD":/repo:ro -v "$PWD/bin":/opt/bin:ro python:3.13-slim
 python3 -I /repo/scripts/smoke_exporters.py --bin-dir /opt/bin`.
 
+## Demo stack: `Bind for 127.0.0.1:3000 failed: port is already allocated`
+
+**Cause:** `docker compose -f demo/docker-compose.yml up` publishes Grafana, Prometheus and the
+simulated server on 127.0.0.1:3000, 9090 and 30120 of the Docker host, and another program or
+container already uses one of them (the message names the port).
+
+**Fix:** remove the half-started stack with `docker compose -f demo/docker-compose.yml down -v`,
+then choose free host ports with `GSO_DEMO_GRAFANA_PORT`, `GSO_DEMO_PROMETHEUS_PORT` and
+`GSO_DEMO_GAME_PORT` ([demo stack](demo.md#start-and-stop)). `scripts/smoke_demo.py` picks free
+ports itself.
+
+## Demo stack: Grafana and the simulated server stopped answering
+
+**Cause:** the services share the network namespace of the Prometheus container. When only that
+container was recreated (for example with `docker compose up -d --force-recreate prometheus`),
+the others are left without a network.
+
+**Fix:** run `docker compose -f demo/docker-compose.yml up -d`; it recreates them in the new
+namespace ([ADR 0020](adr/0020-demo-stack-in-one-network-namespace.md)).
+
+## `smoke_demo: the Compose project … already has N container(s)`
+
+**Cause:** an earlier run of `scripts/smoke_demo.py` was stopped before it could remove its stack,
+or a stack of yours uses the same project name. The script never removes containers it did not
+create.
+
+**Fix:** if they are left from an earlier run, remove them with
+`docker compose -p gameserver-observability-demo-smoke -f demo/docker-compose.yml down -v`;
+otherwise pass another `--project-name`.
+
 ## A dashboard panel shows "No data"
 
 **Cause:** the panel's series are not in the selected data source: the Data source selector points

@@ -6,7 +6,10 @@
 # (scripts/lint_dashboards.py, with every panel query parsed by promtool). The "exporters" job
 # scrapes the fake game server through Prometheus, json_exporter and blackbox_exporter with the
 # pack's configs and rules, and checks that a tick-time spike and a stopped server raise the right
-# alerts (scripts/smoke_exporters.py).
+# alerts (scripts/smoke_exporters.py). The "demo-smoke" job starts the demo stack
+# (demo/docker-compose.yml: the simulated game server, the exporters, Prometheus and Grafana, every
+# image pinned by digest), checks the targets, the rules and the provisioned dashboard through
+# their APIs, and removes the stack again (scripts/smoke_demo.py).
 name: ci
 
 on:
@@ -119,3 +122,20 @@ jobs:
 
       - name: Scrape the fake game server through the exporters and evaluate the rules
         run: python3 scripts/smoke_exporters.py
+
+  demo-smoke:
+    name: demo-smoke
+    runs-on: ubuntu-24.04
+    # The checks took about a minute locally with the images already pulled (README, Results);
+    # each wait of the script gives up after 3 minutes, and the five images are pulled first.
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Start the demo stack, check it through the APIs and remove it
+        run: python3 scripts/smoke_demo.py
