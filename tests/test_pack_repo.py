@@ -8,7 +8,7 @@
 - Python requirements are pinned by version and sha256.
 - CI and the release build run the same test command; the promtool, Prometheus, exporter and
   gitleaks pins match docs/toolchain.md and the secret-scan workflow; the promtool job runs the
-  pack check and the exporters job the end-to-end run.
+  pack check and the dashboard check, and the exporters job the end-to-end run.
 - Every metric the scrape configs and the json_exporter modules produce, and every job and probe
   module of every scrape file, is in docs/metrics.md; scripts/smoke_exporters.py expects exactly
   those metrics and runs every scrape file except the optional tunnel probe.
@@ -63,8 +63,10 @@ PACK_PATHS = [
     "blackbox/blackbox.yml",
     "rules/fxserver.alerts.yml",
     "tests/rules/tick.test.yml",
-    "grafana/dashboards/fxserver-overview.json",
-    "grafana/provisioning/datasources/prometheus.yml",
+    "grafana/dashboards/game-server-overview.json",
+    "grafana/dashboards/shareable/game-server-overview.json",
+    "grafana/provisioning/dashboards/gameserver-observability.yml",
+    "grafana/provisioning/datasources/gameserver-observability.yml",
     "demo/docker-compose.yml",
     "docs/metrics.md",
 ]
@@ -234,9 +236,10 @@ class WorkflowInputsTest(unittest.TestCase):
         self.assertIn(f"prometheus-{version}.linux-amd64.tar.gz", toolchain)
         self.assertIn(sha256, toolchain)
 
-    def test_promtool_job_checks_the_pack_configs(self):
+    def test_promtool_job_checks_the_pack_configs_and_the_dashboards(self):
         runs = [step.get("run", "") for step in load_yaml(".github/workflows/ci.yml")["jobs"]["promtool"]["steps"]]
         self.assertIn("python3 scripts/check_pack.py --require-promtool", runs)
+        self.assertIn("python3 scripts/lint_dashboards.py --require-promtool", runs)
 
     def test_exporter_pins_match_the_toolchain_page_and_the_promtool_job(self):
         jobs = load_yaml(".github/workflows/ci.yml")["jobs"]

@@ -1,0 +1,22 @@
+# Loads the pack's dashboards from a folder on the Grafana host into the Grafana folder
+# "Game server" (docs/install.md#dashboards). Copy only grafana/dashboards/*.json into that folder:
+# Grafana also reads its subfolders, and the copies in grafana/dashboards/shareable/ are for
+# importing, not for provisioning.
+#   install -D -m 0644 grafana/provisioning/dashboards/gameserver-observability.yml \
+#     /etc/grafana/provisioning/dashboards/gameserver-observability.yml
+#   install -D -m 0644 -t /var/lib/grafana/dashboards/gameserver-observability grafana/dashboards/*.json
+apiVersion: 1
+providers:
+  - name: gameserver-observability
+    orgId: 1
+    folder: Game server
+    folderUid: gso-game-server
+    type: file
+    # The files in the repository are the source: changes made in Grafana cannot be saved over
+    # them, and a dashboard whose file is gone is not deleted from Grafana by accident.
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 60
+    options:
+      path: /var/lib/grafana/dashboards/gameserver-observability
+      foldersFromFilesStructure: false

@@ -1,12 +1,14 @@
 # Installation
 
-Install the scrape jobs, the exporter modules and the rules on the host that runs Prometheus. The
-game server needs no software from this pack, only the two `/perf/` credentials
+Install the scrape jobs, the exporter modules and the rules on the host that runs Prometheus, and
+the dashboard on the host that runs Grafana ([Dashboards](#dashboards)). The game server needs no
+software from this pack, only the two `/perf/` credentials
 ([configuration](configuration.md#game-server)). There is no release yet, so the commands use the
 `main` branch; once releases exist, check out a release tag instead and verify the download as
 shown below.
 
-The commands in [Install](#install) and [Uninstall](#uninstall) were run on 2026-10-21 as root in
+The commands in [Install](#install), and those for Prometheus and the exporters in
+[Uninstall](#uninstall), were run on 2026-10-21 as root in
 a `python:3.13-slim` container, against the fake server: from a local copy instead of
 `git clone`, without `sudo`, with the password written by `printf` instead of `sudoedit`, with the
 exporters started by the commands of their `ExecStart=` lines and Prometheus 3.15.0 started
@@ -27,6 +29,8 @@ its content.
 | blackbox_exporter | 0.29.0 tested | |
 | Game server (FXServer) | build 35245 read in the source | not yet tried against a running server; see the README's Limitations |
 | node_exporter, mysqld_exporter | not run here | optional, for the host, build and database alerts; scraped by jobs of your own ([configuration](configuration.md#host-and-database-jobs)) |
+| Grafana | 13.2.4 tested | optional, for the [dashboard](#dashboards); dashboard schema 42, the latest of Grafana 13.2.4; other versions not tried |
+| cloudflared | 2026.10.2 tested | optional, for the dashboard's tunnel panels; its metrics scraped by a job of your own |
 | Network | | the Prometheus host reaches the game port (30120) over loopback, a private network or a tunnel; the exporters listen on 127.0.0.1; the optional version list job needs outbound HTTPS from json_exporter |
 | Python | 3.10 or newer | only for the pack check, the fake server and the repository's tests |
 
@@ -106,6 +110,41 @@ hostname probe (`prometheus/scrape/tunnel.yml`, set its target first) and the ve
 sudo install -D -m 0644 prometheus/scrape/versions.yml /etc/prometheus/scrape/versions.yml
 ```
 
+## Dashboards
+
+The dashboard "Game server overview" needs Grafana with a Prometheus data source that holds the
+pack's series. It picks Grafana's default Prometheus data source; switch it with the Data source
+selector at the top. Only if Grafana has no data source for this Prometheus yet, install the
+pack's one first and set its `url` to your Prometheus, for example `http://127.0.0.1:9090`
+([configuration](configuration.md#dashboard-grafana)). On the Grafana host, from the clone (paths
+of the Grafana packages; adapt them for another setup):
+
+```bash
+sudo install -D -m 0644 grafana/provisioning/datasources/gameserver-observability.yml /etc/grafana/provisioning/datasources/gameserver-observability.yml
+sudoedit /etc/grafana/provisioning/datasources/gameserver-observability.yml   # url: your Prometheus
+```
+
+Then install the dashboard and restart Grafana. Copy only `grafana/dashboards/*.json`, not the
+`shareable/` folder:
+
+```bash
+sudo install -D -m 0644 grafana/provisioning/dashboards/gameserver-observability.yml /etc/grafana/provisioning/dashboards/gameserver-observability.yml
+sudo install -D -m 0644 -t /var/lib/grafana/dashboards/gameserver-observability grafana/dashboards/*.json
+sudo systemctl restart grafana-server
+```
+
+Without access to Grafana's files, import the copy without variables instead: Dashboards → New →
+Import, upload `grafana/dashboards/shareable/game-server-overview.json` and choose the Prometheus
+data source. It shows every game server at once. Do not import it into the folder of the
+provisioned dashboard, which has the same title.
+
+The commands above were run on 2026-10-21 as root in a `grafana/grafana:13.2.4` container (without
+`sudo`, with the container's start instead of `systemctl`, the data source file unchanged and
+Prometheus reachable as `prometheus:9090`): Grafana created the folder "Game server" with the
+dashboard and the data source "Game server metrics", the dashboard opened with that data source
+and the Game server selector on All (`game-01`), and every panel showed data from the fake server
+and the exporters. The import of the shareable copy was run through Grafana's import API.
+
 ## Verify the release download
 
 Every release has a `SHA256SUMS` file and a build provenance attestation (the attestation only
@@ -141,6 +180,10 @@ With the version list job, `fxserver_recommended_build` returns the current Reco
 Status → Alerts shows what is pending or firing. [Troubleshooting](troubleshooting.md) covers the
 usual errors.
 
+In Grafana, Dashboards → Game server → Game server overview shows your game servers in the Game
+server selector, Status `Up` and the player count. Panels of rows whose exporter you do not
+scrape (host, MariaDB, tunnel, admin hostname) show "No data".
+
 ## Check the repository
 
 ```bash
@@ -148,21 +191,28 @@ bash scripts/test.sh                    # unit tests, including the fake server 
 python3 scripts/check_pack.py           # configs parse, privacy rules, and promtool when on the PATH
 bash scripts/check_promtool.sh          # rule checks and rule tests (needs promtool)
 python3 scripts/smoke_exporters.py      # end to end (needs prometheus, json_exporter, blackbox_exporter)
+python3 scripts/lint_dashboards.py      # dashboards and their shareable copies, and promtool when on the PATH
 ```
 
 `scripts/test.sh` ends with a summary like this one, from a machine without gitleaks,
 markdownlint-cli2 and promtool (the tests that need them are skipped):
 
 ```text
-Ran 209 tests in 6.209s
+Ran 254 tests in 9.082s
 
-OK (skipped=11)
+OK (skipped=13)
 ```
 
 `python3 scripts/check_pack.py` with promtool on the `PATH` prints:
 
 ```text
 check_pack: 0 finding(s) in 5 parsed file(s); promtool: 3 file(s) passed promtool check config
+```
+
+`python3 scripts/lint_dashboards.py` with promtool on the `PATH` prints:
+
+```text
+lint_dashboards: 0 finding(s) in 2 file(s), 75 queries; promtool: 75 queries passed promtool check rules
 ```
 
 `python3 scripts/smoke_exporters.py --bin-dir bin` (binaries as on the [toolchain page](toolchain.md))
@@ -195,3 +245,27 @@ sudo rm -f /etc/json_exporter/config.yml /etc/blackbox_exporter/blackbox.yml
 Directories that are empty afterwards (`/etc/prometheus/secrets`, `/etc/prometheus/rules`,
 `/etc/prometheus/scrape`, `/etc/json_exporter`, `/etc/blackbox_exporter`) can be removed with
 `sudo rmdir`.
+
+For the dashboard, remove the provisioning file together with the dashboard files and restart
+Grafana; it then deletes the dashboard (with only the dashboard files gone, it would keep it).
+The empty folder "Game server" stays until you delete it in Grafana:
+
+```bash
+sudo rm -f /etc/grafana/provisioning/dashboards/gameserver-observability.yml
+sudo rm -rf /var/lib/grafana/dashboards/gameserver-observability
+sudo systemctl restart grafana-server
+```
+
+A provisioned data source cannot be deleted in Grafana, and it stays when its file is removed. If
+you installed the pack's one, replace its file with one that deletes it, restart Grafana, then
+remove the file:
+
+```bash
+printf 'apiVersion: 1\ndeleteDatasources:\n  - name: Game server metrics\n    orgId: 1\n' |
+  sudo tee /etc/grafana/provisioning/datasources/gameserver-observability.yml
+sudo systemctl restart grafana-server
+sudo rm /etc/grafana/provisioning/datasources/gameserver-observability.yml
+```
+
+These steps were run on 2026-10-21 in the same container: after the first restart the dashboard
+was gone and the folder was left; after the second the data source was gone.

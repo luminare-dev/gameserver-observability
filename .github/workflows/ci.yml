@@ -1,11 +1,12 @@
 # Caller: lint, tests and the full-history secret scan on every pull request and push to main.
 # Required checks for the main ruleset: "ci / lint-test" and "secrets / gitleaks".
 # The "promtool" job checks and tests the pack's Prometheus rules (scripts/check_promtool.sh:
-# promtool check rules and promtool test rules) and checks its scrape and exporter configs
-# (scripts/check_pack.py, with promtool check config). The "exporters" job scrapes the fake game
-# server through Prometheus, json_exporter and blackbox_exporter with the pack's configs and
-# rules, and checks that a tick-time spike and a stopped server raise the right alerts
-# (scripts/smoke_exporters.py).
+# promtool check rules and promtool test rules), checks its scrape and exporter configs
+# (scripts/check_pack.py, with promtool check config) and its Grafana dashboards
+# (scripts/lint_dashboards.py, with every panel query parsed by promtool). The "exporters" job
+# scrapes the fake game server through Prometheus, json_exporter and blackbox_exporter with the
+# pack's configs and rules, and checks that a tick-time spike and a stopped server raise the right
+# alerts (scripts/smoke_exporters.py).
 name: ci
 
 on:
@@ -69,6 +70,9 @@ jobs:
 
       - name: Check the scrape and exporter configs
         run: python3 scripts/check_pack.py --require-promtool
+
+      - name: Check the dashboards
+        run: python3 scripts/lint_dashboards.py --require-promtool
 
   exporters:
     name: exporters

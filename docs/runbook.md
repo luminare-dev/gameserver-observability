@@ -164,7 +164,7 @@ older than 3 months).
 
 | | |
 |---|---|
-| **Meaning** | The promtool download did not match its pinned sha256, or `scripts/check_promtool.sh` reported invalid rules (`promtool check rules` with all lint checks, lint findings fatal), a failing rule test, or rule files while `tests/rules/` has no rule test at all. (A rule file that no rule test names in `rule_files`, an alert without a firing and a quiet case, or a missing runbook section fails `tests/test_pack_repo.py` or `tests/test_rules.py` in `ci / lint-test` instead.) |
+| **Meaning** | The promtool download did not match its pinned sha256, or `scripts/check_promtool.sh` reported invalid rules (`promtool check rules` with all lint checks, lint findings fatal), a failing rule test, or rule files while `tests/rules/` has no rule test at all. (A rule file that no rule test names in `rule_files`, an alert without a firing and a quiet case, or a missing runbook section fails `tests/test_pack_repo.py` or `tests/test_rules.py` in `ci / lint-test` instead. The pack check and the dashboard check run in this job too; see their sections below.) |
 | **Impact** | The pull request should not be merged; rules that do not load or are untested would ship in the next release. |
 | **Diagnosis** | Read the job log: `sha256sum` errors point to the download, `promtool check rules` and `promtool test rules` print the file, rule and expected versus actual alerts or values. Reproduce with `bash scripts/check_promtool.sh` and promtool 3.15.0. |
 | **Mitigation** | Fix the rule or its test in the same pull request. |
@@ -179,6 +179,16 @@ older than 3 months).
 | **Diagnosis** | Each finding names the file, the check and the cause, for example `prometheus/scrape/fxserver.yml: [labels] job fxserver_perf static label: label 'player' could identify a player`. Reproduce with `python3 scripts/check_pack.py` (with promtool 3.15.0 on the `PATH` for the promtool part). |
 | **Mitigation** | Fix the config in the same pull request. |
 | **Fix** | Follow the message; [metrics reference](metrics.md#not-collected) lists what the pack never collects and why. A parse finding about unsupported YAML means: write the value the way the other configs do (quoted strings, `true`/`false`, one-line flow lists) ([ADR 0011](adr/0011-pack-check-in-standard-library-python.md)). An `[addresses]` finding in a copy with the addresses of your servers is expected: check that copy with `--allow-any-address`; in this repository, use loopback or the documentation ranges. |
+
+## Failure: the dashboard check fails
+
+| | |
+|---|---|
+| **Meaning** | `python3 scripts/lint_dashboards.py` found a problem in `grafana/dashboards/`: a file does not parse or is not in the repository's format, a title contains a platform or vendor mark, a panel stores a data source uid or a variable stores a selection, a query reads a metric that is not in `docs/metrics.md`, uses a label that could identify a player or the `instance` label, is not aggregated, or does not parse in promtool, a panel has no title, description or legend, or a shareable copy is missing or outdated. The unit tests run it in `ci / lint-test`, the `promtool` job runs it with `--require-promtool`. |
+| **Impact** | The pull request must not be merged: the dashboard would break on import, show data about players or host addresses, or read series the pack does not describe. |
+| **Diagnosis** | Each finding names the file, the check, the panel and the query, for example `grafana/dashboards/game-server-overview.json: [metrics] panel 3 ('Players') query A: metric 'fxserver_players' is not in docs/metrics.md`. Reproduce with `python3 scripts/lint_dashboards.py` (with promtool 3.15.0 on the `PATH` for the promtool part). |
+| **Mitigation** | Fix the dashboard in the same pull request. |
+| **Fix** | Follow the message. For a new metric, add it to a table of the [metrics reference](metrics.md) first; after any change run `python3 scripts/lint_dashboards.py --fix`, which writes the shareable copy ([ADR 0019](adr/0019-dashboard-check-in-standard-library-python.md)). |
 
 ## Failure: the `exporters` job fails
 
