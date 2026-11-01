@@ -2,7 +2,7 @@
 # (a repository marked as a template), so only repositories created from it make releases.
 # Needs the repository setting "Allow GitHub Actions to create and approve pull requests".
 # The release archive (git archive of the tag) is the pack tarball:
-# gameserver-observability-X.Y.Z.tar.gz plus SHA256SUMS (docs/adr/0005-pack-layout-and-release-archive.md).
+# gameserver-observability-X.Y.Z.tar.gz plus SHA256SUMS.
 name: release
 
 on:

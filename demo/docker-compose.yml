@@ -13,7 +13,7 @@
 # the simulated server can be stopped and started on its own. Only Grafana, Prometheus and the
 # simulated server are published, on 127.0.0.1 of the Docker host; other host ports can be set
 # with GSO_DEMO_GRAFANA_PORT, GSO_DEMO_PROMETHEUS_PORT and GSO_DEMO_GAME_PORT. Every image is pinned
-# by digest to the versions that CI tests (docs/toolchain.md, tests/test_demo.py).
+# by digest to the versions that CI tests (tests/test_demo.py).
 name: gameserver-observability-demo
 
 services:

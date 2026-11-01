@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Checks the pack's Prometheus rule files with promtool. The CI job "promtool" (ci.yml) runs it
-# with promtool from the official Prometheus release tarball, pinned by version and sha256
-# (docs/toolchain.md); run it locally the same way with that promtool on the PATH.
+# Checks the pack's Prometheus rule files with promtool (the CI job "promtool" runs it with the
+# promtool pinned in ci.yml).
 #
 #   bash scripts/check_promtool.sh
 #
@@ -10,11 +9,7 @@
 #   tests/rules/*.test.yml      promtool test rules (unit tests with input series and expected
 #   (and *.test.yaml)           alerts, annotations and recorded values)
 #
-# The check fails when rules/ has rule files but tests/rules/ has no rule test at all. What
-# promtool cannot see is checked by the unit tests in ci / lint-test (scripts/test.sh):
-# RuleCoverageTest in tests/test_pack_repo.py (every rule file is named in the rule_files of a
-# rule test) and tests/test_rules.py (every alert has a firing and a quiet case, labels,
-# annotations, a runbook section, and so on).
+# Fails when rules/ has rule files but tests/rules/ has no rule test at all.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."

@@ -10,15 +10,11 @@ install anything, or to try a change of the pack.
 ![Dashboard "Game server overview" during a tick-time spike, synthetic data from the bundled simulated server](media/dashboard.png)
 
 *Synthetic data from the bundled simulated server: the dashboard of the demo stack while the
-simulated server's main thread ticks slowly and `FXServerTickTimeHigh` fires (how it was made:
-[Pictures](#pictures)).*
+simulated server's main thread ticks slowly and `FXServerTickTimeHigh` fires.*
 
 ## Requirements
 
-Docker Engine with the Compose plugin, and about 2.6 GB of disk for the five images (as Docker
-29.2.1 reports their sizes; Grafana's is 1.9 GB of it). Tested on 2026-10-21 and 2026-10-22 with
-Docker Engine 29.2.1 and Docker Compose 5.0.2; CI starts the stack on GitHub's `ubuntu-24.04`
-runner ([smoke test](#smoke-test)).
+Docker Engine with the Compose plugin, and about 2.6 GB of disk for the five images.
 
 ## Start and stop
 
@@ -44,7 +40,7 @@ GSO_DEMO_GRAFANA_PORT=13000 GSO_DEMO_PROMETHEUS_PORT=19090 GSO_DEMO_GAME_PORT=40
 
 ## What runs
 
-| Service | Image (pinned by digest, [toolchain](toolchain.md#container-images)) | What it does | Listens on |
+| Service | Image (pinned by digest) | What it does | Listens on |
 |---|---|---|---|
 | `prometheus` | `prom/prometheus:v3.15.0` | The pack's scrape jobs (`prometheus/scrape/fxserver.yml`) and rules (`rules/*.yml`); `prometheus/prometheus.demo.yml` is the main config of the [installation guide](install.md#install) | 9090, published on `127.0.0.1` |
 | `fxserver` | `python:3.13-slim` | The simulated server: 3 of 32 players, `/perf/` behind basic auth, a load knob | 30120, published on `127.0.0.1` |
@@ -54,7 +50,7 @@ GSO_DEMO_GRAFANA_PORT=13000 GSO_DEMO_PROMETHEUS_PORT=19090 GSO_DEMO_GAME_PORT=40
 
 The services share one network namespace, so the pack's files are mounted from the repository as
 they are, at the paths of the installation guide: inside the stack, `127.0.0.1` means the same as
-on a single host ([ADR 0020](adr/0020-demo-stack-in-one-network-namespace.md)). The simulated
+on a single host. The simulated
 server and Prometheus share the demo's `/perf/` password `synthetic-demo-only`, which guards
 synthetic data only; never use it for a real server.
 
@@ -85,8 +81,7 @@ drop from about 20 to about 11, most ticks land in the heatmap's buckets from 50
 after the spike ends. `docker compose -f demo/docker-compose.yml stop fxserver` stops the
 simulated server: `FXServerDown` becomes pending within a minute and fires 2 minutes later;
 `docker compose -f demo/docker-compose.yml start fxserver` brings it back with new counters (and 3
-players again), and the Restarts panel counts the restart. These times were measured on this stack
-on 2026-10-21 and 2026-10-22 (README, Results).
+players again), and the Restarts panel counts the restart.
 
 ## Smoke test
 
@@ -94,35 +89,6 @@ on 2026-10-21 and 2026-10-22 (README, Results).
 python3 scripts/smoke_demo.py
 ```
 
-`scripts/smoke_demo.py` starts the stack under its own project name with free ports on
-`127.0.0.1`, and checks through the APIs that every target of `prometheus/scrape/fxserver.yml` is up
-and every probe succeeds (so `/perf/` refuses requests without the password), that Prometheus has
-the simulated server's player count and `players.json` was never requested, that every rule file
-is loaded and every rule evaluated without an error and no alert is active, and that Grafana
-provisioned the dashboard read-only into the folder "Game server", finds it by its title,
-answers a query through the provisioned data source with the same player count, and refuses a
-sign-in. Then it removes the stack with `docker compose down --volumes`, also when a check fails.
-The CI job `demo-smoke` runs it on every pull request.
-
-## Pictures
-
-Both pictures show this stack on 2026-10-21 and hold synthetic data from the bundled simulated
-server only. After a few minutes with 3 players, the simulated server got 8, 13, 19, 22 and 24
-players, a minute apart at first, and from the 19 on its `svMain` ticks took 90 ms on average for
-9 minutes; then it went down to 17 and 12 players.
-
-![Dashboard "Game server overview" over 15 minutes of the run, synthetic data from the bundled simulated server](media/dashboard-spike.gif)
-
-*Synthetic data from the bundled simulated server: the run in 45 frames, each showing the 15
-minutes up to its moment, 20 seconds apart (`docs/media/dashboard-spike.gif`, also at the top of
-the README).*
-
-`docs/media/dashboard.png` (at the top of this page) was taken during the run,
-while `FXServerTickTimeHigh` fired. The frames of `docs/media/dashboard-spike.gif` were drawn
-after the run from the data Prometheus had recorded, each for a 15-minute window ending at its
-moment, so that no panel shows values past that moment. Grafana ran in kiosk mode in headless
-Chromium 156 (the `chromedp/headless-shell` image, pinned by digest in the
-[toolchain](toolchain.md#checked-locally-not-in-ci)), driven by Playwright 1.64.0 over its
-DevTools port on `127.0.0.1`, 1600 pixels wide; the label below each picture was added with
-Pillow, and the GIF was scaled to 1000 pixels. The pictures show the `server` label (`game-01`),
-times and values, and no host name or address.
+It starts the stack under its own project name with free ports, checks targets, probes, rules
+and the dashboard through the APIs of Prometheus and Grafana, and removes the stack again, also
+when a check fails. CI runs it in the `demo-smoke` job.

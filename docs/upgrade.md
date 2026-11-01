@@ -41,8 +41,7 @@ variable, which your own queries, Alertmanager routes, silences or dashboards ma
 
 ## Prometheus, the exporters and Grafana
 
-The pack is tested with the versions under "Supported versions" in the README; the repository's
-CI downloads exactly those ([toolchain](toolchain.md)). After you upgrade Prometheus,
+The pack is tested with the versions under "Supported versions" in the README. After you upgrade Prometheus,
 json_exporter, blackbox_exporter or Grafana on your side, run the checks of
 [Check that it works](install.md#check-that-it-works) again. The json_exporter modules have the
 format of 0.8.0, and the dashboard has schema 42, the latest of Grafana 13.2.4; other versions
@@ -51,7 +50,7 @@ have not been tried.
 ## The game server
 
 A new FXServer build may change the endpoints the pack reads. The source code of the endpoints was
-the same in builds 35245 and 37692 (README, Results), and nothing has been tried on a running
+the same in builds 35245 and 37692, and nothing has been tried on a running
 server yet. After switching to a build outside that range, check in Prometheus that:
 
 - `up{job=~"fxserver_.*"}` is 1 for every target; a scrape that keeps failing raises
