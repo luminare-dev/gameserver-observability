@@ -3,13 +3,8 @@
 # Load every file of rules/ together:
 #   rule_files: [/etc/prometheus/rules/*.yml]
 #
-# Every alert carries the labels server and severity (critical: act now, the server or its
-# database is down for players or the admin interface is open; warning: act within the day),
-# never instance, which can hold a host address
-# (docs/adr/0013-probed-target-in-the-instance-label.md). Every alert has the annotations
-# summary, description and runbook_url; docs/runbook.md has one section per alert, and
-# tests/rules/*.test.yml test each alert where it fires and where it must not
-# (docs/adr/0015-alerts-per-game-server.md).
+# Every alert carries the labels server and severity, never instance (it can hold a host
+# address), and the annotations summary, description and runbook_url (docs/runbook.md).
 groups:
   - name: fxserver-alerts
     interval: 30s
@@ -73,8 +68,7 @@ groups:
       # 0 players 30 minutes after a restart: no player now and in the last 30 minutes, a restart
       # 30 to 60 minutes ago (a reset of the svMain tick counter), and players in the 30 minutes
       # before that, so that a server that was empty before its restart does not fire. Active
-      # from 30 until at most 60 minutes after the restart
-      # (docs/adr/0016-restarts-from-tick-counter-resets.md).
+      # from 30 until at most 60 minutes after the restart.
       - alert: FXServerNoPlayersAfterRestart
         expr: >-
           (

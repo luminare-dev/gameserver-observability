@@ -47,8 +47,7 @@ jobs:
     permissions:
       contents: read
     env:
-      # Official Prometheus release tarball; sha256 from the release's sha256sums.txt
-      # (docs/toolchain.md, verified 2026-10-21). Dependabot does not see this pin: bump by hand.
+      # Official Prometheus release tarball; sha256 from its sha256sums.txt. Bumped by hand.
       PROMTOOL_VERSION: 3.15.0
       PROMTOOL_SHA256: 2a542df32eac02ee17b9d844fb2aa1de00dafa5476579ba8a3ba862e9d572ea0
     steps:
@@ -85,9 +84,8 @@ jobs:
     permissions:
       contents: read
     env:
-      # Official release tarballs; each sha256 is from that release's sha256sums.txt
-      # (docs/toolchain.md, verified 2026-10-21). Dependabot does not see these pins: bump by hand.
-      # Prometheus is the same tarball as in the promtool job (tests/test_pack_repo.py checks it).
+      # Official release tarballs; sha256 from each sha256sums.txt. Bumped by hand.
+      # Prometheus is the same tarball as in the promtool job.
       PROMETHEUS_VERSION: 3.15.0
       PROMETHEUS_SHA256: 2a542df32eac02ee17b9d844fb2aa1de00dafa5476579ba8a3ba862e9d572ea0
       JSON_EXPORTER_VERSION: 0.8.0
@@ -126,8 +124,7 @@ jobs:
   demo-smoke:
     name: demo-smoke
     runs-on: ubuntu-24.04
-    # The checks took about a minute locally with the images already pulled (README, Results);
-    # each wait of the script gives up after 3 minutes, and the five images are pulled first.
+    # About a minute with the images pulled; each wait in the script gives up after 3 minutes.
     timeout-minutes: 15
     permissions:
       contents: read

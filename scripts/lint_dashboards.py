@@ -3,7 +3,7 @@
 
 Files: grafana/dashboards/*.json, the dashboards that Grafana provisions from this repository
 (with a data source variable), and grafana/dashboards/shareable/*.json, one copy of each without
-template variables, for importing and sharing (docs/adr/0018-dashboard-with-a-shareable-copy.md).
+template variables, for importing and sharing.
 
   python3 scripts/lint_dashboards.py [--root DIR] [--require-promtool] [--fix]
 
@@ -27,7 +27,7 @@ Checks:
                clause or with by (...)), so a panel shows only the labels its query chose
   labels       no label a query matches or groups by, and none a legend shows, could identify
                a player (the names check_pack.py rejects); no text anywhere uses the label
-               instance, which holds host addresses (docs/adr/0013-probed-target-in-the-instance-label.md)
+               instance, which holds host addresses
   panels       every panel has a unique id, a title, a place on the 24-column grid that overlaps
                no other panel and, except rows, a description; every query has a unique refId,
                an expression and, unless it is a table query, a legend of its own
@@ -653,7 +653,7 @@ class DashboardLinter:
         for where, text in strings(doc):
             if INSTANCE_RE.search(text):
                 self.add(rel, "labels", f"{where}: uses 'instance', which holds host addresses; group by server "
-                                        "and module instead (ADR 0013)")
+                                        "and module instead")
             for match in IPV4_RE.finditer(text):
                 self.add(rel, "links", f"{where}: IP address {match.group(1)}")
             for url in URL_RE.findall(text):

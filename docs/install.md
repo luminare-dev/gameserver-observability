@@ -15,27 +15,14 @@ the pack first without a game server, start the [demo stack](demo.md).
 Check out a release tag rather than the `main` branch, which can hold unreleased changes, and
 verify the download as shown below.
 
-The commands in [Install](#install), and those for Prometheus and the exporters in
-[Uninstall](#uninstall), were run on 2026-10-21 as root in
-a `python:3.13-slim` container, against the fake server: from a local copy instead of
-`git clone`, without `sudo`, with the password written by `printf` instead of `sudoedit`, with the
-exporters started by the commands of their `ExecStart=` lines and Prometheus 3.15.0 started
-directly instead of as services, with `fxserver.yml`, the optional `versions.yml` and the rules
-included. All seven targets were up (the version list job read 35245 from the real list), the
-five rule groups were evaluated without an error, no alert was active, and the queries in
-[Check that it works](#check-that-it-works) returned their series. On a second run, with an
-exporter config already in each place, the first Install block left both files unchanged.
-Run again on 2026-10-22 in the same image, the password block kept an existing password file and
-its content.
-
 ## Requirements
 
 | Requirement | Version | Notes |
 |---|---|---|
 | Prometheus | 3.15.0 tested | 3.x; `scrape_config_files` needs 2.43 or newer, the scrape jobs are checked with promtool 3.15.0 |
-| json_exporter | 0.8.0 tested | the module format of 0.8.0 ([toolchain](toolchain.md) has the download and sha256) |
+| json_exporter | 0.8.0 tested | the module format of 0.8.0 |
 | blackbox_exporter | 0.29.0 tested | |
-| Game server (FXServer) | build 35245 read in the source | not yet tried against a running server; see the README's Limitations |
+| Game server (FXServer) | build 35245 read in the source | not yet tried against a running server |
 | node_exporter, mysqld_exporter | not run here | optional, for the host, build and database alerts; scraped by jobs of your own ([configuration](configuration.md#host-and-database-jobs)) |
 | Grafana | 13.2.4 tested | optional, for the [dashboard](#dashboards); dashboard schema 42, the latest of Grafana 13.2.4; other versions not tried |
 | cloudflared | 2026.10.2 tested | optional, for the dashboard's tunnel panels; its metrics scraped by a job of your own |
@@ -92,7 +79,7 @@ The host, build and database alerts read node_exporter and mysqld_exporter: give
 
 Run both exporters as services of your init system, listening on loopback. If they are not
 services yet, these are the `ExecStart=` lines of their systemd units (binaries in
-`/usr/local/bin`; the downloads and their sha256 are on the [toolchain page](toolchain.md)); use
+`/usr/local/bin`, from the projects' GitHub releases); use
 the path of the merged config if you merged the modules:
 
 ```ini
@@ -145,13 +132,6 @@ Without access to Grafana's files, import the copy without variables instead: Da
 Import, upload `grafana/dashboards/shareable/game-server-overview.json` and choose the Prometheus
 data source. It shows every game server at once. Do not import it into the folder of the
 provisioned dashboard, which has the same title.
-
-The commands above were run on 2026-10-21 as root in a `grafana/grafana:13.2.4` container (without
-`sudo`, with the container's start instead of `systemctl`, the data source file unchanged and
-Prometheus reachable as `prometheus:9090`): Grafana created the folder "Game server" with the
-dashboard and the data source "Game server metrics", the dashboard opened with that data source
-and the Game server selector on All (`game-01`), and every panel showed data from the fake server
-and the exporters. The import of the shareable copy was run through Grafana's import API.
 
 ## With the luminare.gameserver collection
 
@@ -231,41 +211,6 @@ python3 scripts/lint_dashboards.py      # dashboards and their shareable copies,
 python3 scripts/smoke_demo.py           # starts, checks and removes the demo stack (needs Docker with Compose)
 ```
 
-`scripts/test.sh` ends with a summary like this one, from a machine without gitleaks,
-markdownlint-cli2 and promtool (the tests that need them are skipped):
-
-```text
-Ran 276 tests in 9.276s
-
-OK (skipped=13)
-```
-
-`python3 scripts/check_pack.py` with promtool on the `PATH` prints:
-
-```text
-check_pack: 0 finding(s) in 6 parsed file(s); promtool: 4 file(s) passed promtool check config
-```
-
-`python3 scripts/lint_dashboards.py` with promtool on the `PATH` prints:
-
-```text
-lint_dashboards: 0 finding(s) in 2 file(s), 75 queries; promtool: 75 queries passed promtool check rules
-```
-
-`python3 scripts/smoke_exporters.py --bin-dir bin` (binaries as on the [toolchain page](toolchain.md))
-prints one line per check and ends with:
-
-```text
-smoke_exporters: all checks passed (187 s)
-```
-
-`python3 scripts/smoke_demo.py` ([demo stack](demo.md#smoke-test)) prints one line per check and
-ends with:
-
-```text
-smoke_demo: all checks passed, stack removed (57 s)
-```
-
 ## Uninstall
 
 Remove the `scrape_config_files` entries and reload Prometheus. Stop the exporters, or, if they
@@ -310,6 +255,3 @@ printf 'apiVersion: 1\ndeleteDatasources:\n  - name: Game server metrics\n    or
 sudo systemctl restart grafana-server
 sudo rm /etc/grafana/provisioning/datasources/gameserver-observability.yml
 ```
-
-These steps were run on 2026-10-21 in the same container: after the first restart the dashboard
-was gone and the folder was left; after the second the data source was gone.

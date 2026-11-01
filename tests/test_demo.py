@@ -3,7 +3,7 @@
 The CI job demo-smoke starts the stack and checks it through the APIs. These tests check without
 Docker what that run cannot see, or would only see by failing late:
 
-- every image is pinned by digest, at the versions CI tests and docs/toolchain.md lists;
+- every image is pinned by digest, at the versions CI tests;
 - only Prometheus, the owner of the one network namespace, publishes ports, and only on
   127.0.0.1; the exporters listen on 127.0.0.1 inside it;
 - the pack's files are mounted unchanged at the paths of docs/install.md, the demo's main
@@ -74,13 +74,11 @@ class DemoComposeTest(unittest.TestCase):
         self.services = self.compose["services"]
         self.ci_env = load_yaml(ROOT / ".github" / "workflows" / "ci.yml")["jobs"]["exporters"]["env"]
 
-    def test_every_image_is_pinned_by_digest_and_listed_on_the_toolchain_page(self):
-        toolchain = (ROOT / "docs" / "toolchain.md").read_text(encoding="utf-8")
+    def test_every_image_is_pinned_by_digest(self):
         for name, service in self.services.items():
             with self.subTest(service=name):
                 self.assertRegex(service["image"], IMAGE_RE)
                 self.assertNotIn("build", service)
-                self.assertIn(f"`{service['image']}`", toolchain)
 
     def test_images_are_the_versions_ci_tests(self):
         matches = [IMAGE_RE.match(service["image"]) for service in self.services.values()]

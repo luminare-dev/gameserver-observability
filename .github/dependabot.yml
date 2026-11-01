@@ -5,7 +5,7 @@
 # image digests of the demo stack (demo/docker-compose.yml). A 7-day
 # cooldown lets a bad release surface before it lands here. The pinned gitleaks, actionlint and
 # promtool downloads (version + sha256 in the workflows and scripts/test.sh) are not seen by
-# Dependabot; bump them by hand (docs/toolchain.md, monthly). Every ecosystem needs a
+# Dependabot; bump them by hand. Every ecosystem needs a
 # Conventional Commit prefix with "include: scope" and the "dependencies" label
 # (tests/test_pack_repo.py checks this).
 version: 2
@@ -41,9 +41,8 @@ updates:
         patterns: ["*"]
 
   # The demo images must stay at the versions CI tests with the pinned binaries
-  # (tests/test_demo.py), so new versions are bumped by hand together with those pins
-  # (docs/toolchain.md). Version updates are ignored here, so that Dependabot proposes only a new
-  # digest under the same tag, such as a rebuilt python:3.13-slim.
+  # (tests/test_demo.py), so new versions are bumped by hand. Version updates are ignored
+  # here; Dependabot proposes only a new digest under the same tag.
   - package-ecosystem: docker-compose
     directory: /demo
     schedule:

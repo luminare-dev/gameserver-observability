@@ -1,14 +1,14 @@
 # Runbook
 
-One section per alert of the pack's rules (`rules/`), then one per failure of the repository's
-own automation. The `runbook_url` of every alert links to its section here. Each section answers
+One section per alert of the pack's rules (`rules/`). The `runbook_url` of every alert links to
+its section here. Each section answers
 the same five questions: what fired (Meaning), what it does to players and admins (Impact), how to
 find the cause (Diagnosis), how to limit the damage now (Mitigation) and how to remove the cause
 (Fix).
 
 Severity `critical` means act now: the game server or its database is down for players, or the
 admin interface is open to anyone. `warning` means act within the day: the server is slow, at
-risk, or partly unmonitored ([ADR 0015](adr/0015-alerts-per-game-server.md)). The queries use `game-01` for the `server`
+risk, or partly unmonitored. The queries use `game-01` for the `server`
 label; use the value of the alert. The commands assume a game server set up like the
 `luminare.gameserver` collection sets it up (service `fxserver.service`, files under
 `/opt/fxserver`); adapt them to your setup. Thresholds and how to change them:
@@ -36,7 +36,7 @@ older than 3 months).
 |---|---|
 | **Meaning** | For 10 minutes Prometheus has not been able to scrape at least one target of the job in the alert (`up` is 0), while the probes do not report the server as down. Severity warning. |
 | **Impact** | The game server may be fine, but the series of that target are missing, and the alerts that read them stay quiet: `fxserver_perf` feeds [FXServerTickTimeHigh](#alert-fxserverticktimehigh) and [FXServerNoPlayersAfterRestart](#alert-fxservernoplayersafterrestart); `fxserver_json` the player count; `fxserver_blackbox` [FXServerDown](#alert-fxserverdown) and [FXServerPerfEndpointExposed](#alert-fxserverperfendpointexposed); `fxserver_tunnel` the admin hostname alerts. The version list job (`fxserver_versions`) has no `server` label and is not part of this alert: check `up{job="fxserver_versions"}` there. |
-| **Diagnosis** | Prometheus → Status → Targets shows the target's last error. `server returned HTTP status 401 Unauthorized` on `fxserver_perf`: the password file and the server's `sv_prometheusBasicAuth*` values differ. `503` on `fxserver_json`: json_exporter could not fetch the JSON, see its log (`Failed to fetch JSON response`); a `403 Nope.` comes from request paranoia when a proxy sits between json_exporter and the server, a `429` from the server's rate limit. `connection refused` on an exporter job: json_exporter or blackbox_exporter is not running (`systemctl status json_exporter blackbox_exporter`). `sample limit exceeded`: the target served more series than its `sample_limit` ([cardinality budget](cardinality.md)). [Troubleshooting](troubleshooting.md) has each case. |
+| **Diagnosis** | Prometheus → Status → Targets shows the target's last error. `server returned HTTP status 401 Unauthorized` on `fxserver_perf`: the password file and the server's `sv_prometheusBasicAuth*` values differ. `503` on `fxserver_json`: json_exporter could not fetch the JSON, see its log (`Failed to fetch JSON response`); a `403 Nope.` comes from request paranoia when a proxy sits between json_exporter and the server, a `429` from the server's rate limit. `connection refused` on an exporter job: json_exporter or blackbox_exporter is not running (`systemctl status json_exporter blackbox_exporter`). `sample limit exceeded`: the target served more series than its `sample_limit`. [Troubleshooting](troubleshooting.md) has each case. |
 | **Mitigation** | Start the exporter that stopped. Until the target is back, watch the server through txAdmin or its console. |
 | **Fix** | Correct the password file, the exporter service or the scrape job, check a changed copy of the configs with `python3 scripts/check_pack.py --allow-any-address` ([configuration](configuration.md)), and reload Prometheus. |
 
@@ -139,63 +139,3 @@ older than 3 months).
 | **Diagnosis** | `SHOW FULL PROCESSLIST;` shows the queries running now. Turn on the slow query log (`SET GLOBAL slow_query_log = ON;`), find its file with `SHOW VARIABLES LIKE 'slow_query_log_file';` and summarise it with `mysqldumpslow`. `EXPLAIN` a slow query: a full table scan points to a missing index; `SHOW ENGINE INNODB STATUS\G` shows lock waits. |
 | **Mitigation** | End a runaway query (`KILL <id>;`), or stop the resource that sends it. |
 | **Fix** | Add the missing index, delete old rows from tables that only grow (logs, history), or give the buffer pool more memory. If `long_query_time` was lowered on purpose, raise the alert's threshold to match ([configuration](configuration.md#rules-rules)). |
-
-## Failure: the release build fails on the tag
-
-| | |
-|---|---|
-| **Meaning** | The release workflow created the tag `vX.Y.Z` and a draft release, but the `build` job failed: `bash scripts/test.sh` on the tag, or packing the archive. |
-| **Impact** | The draft release has no files and stays unpublished; users see no new release. |
-| **Diagnosis** | Open the failed run under Actions → release, job `build`. Run `git checkout vX.Y.Z && bash scripts/test.sh` locally to reproduce. |
-| **Mitigation** | Nothing is published, so nothing has to be withdrawn. If the failure was transient (a download or PyPI timeout), use **Re-run failed jobs** on the run; the jobs check out the same tag again. |
-| **Fix** | Fix the cause in a pull request. The version in `.release-please-manifest.json` already moved to X.Y.Z, so the fix is released under the next version number. Delete the unpublished draft release and its tag, so the broken version does not linger. |
-
-## Failure: the release pull request shows no checks
-
-| | |
-|---|---|
-| **Meaning** | release-please opened or updated its pull request with `GITHUB_TOKEN`, and changes made with that token do not start other workflows. |
-| **Impact** | The required checks never report, so the pull request cannot be merged. |
-| **Diagnosis** | The pull request `chore(main): release X.Y.Z` lists no runs of `ci` or `pr`. |
-| **Mitigation** | Close the pull request and reopen it once; that starts the checks. |
-| **Fix** | None needed; this is how `GITHUB_TOKEN` works ([ADR 0004](adr/0004-draft-releases-with-checksums-and-provenance.md)). |
-
-## Failure: the `promtool` job fails
-
-| | |
-|---|---|
-| **Meaning** | The promtool download did not match its pinned sha256, or `scripts/check_promtool.sh` reported invalid rules (`promtool check rules` with all lint checks, lint findings fatal), a failing rule test, or rule files while `tests/rules/` has no rule test at all. (A rule file that no rule test names in `rule_files`, an alert without a firing and a quiet case, or a missing runbook section fails `tests/test_pack_repo.py` or `tests/test_rules.py` in `ci / lint-test` instead. The pack check and the dashboard check run in this job too; see their sections below.) |
-| **Impact** | The pull request should not be merged; rules that do not load or are untested would ship in the next release. |
-| **Diagnosis** | Read the job log: `sha256sum` errors point to the download, `promtool check rules` and `promtool test rules` print the file, rule and expected versus actual alerts or values. Reproduce with `bash scripts/check_promtool.sh` and promtool 3.15.0. |
-| **Mitigation** | Fix the rule or its test in the same pull request. |
-| **Fix** | For checksum errors, take the version and the sha256 from the same Prometheus release ([toolchain](toolchain.md)). When a rule changes on purpose, change its expected alerts and annotations in `tests/rules/` and its section in this runbook with it. |
-
-## Failure: the pack check fails
-
-| | |
-|---|---|
-| **Meaning** | `python3 scripts/check_pack.py` found a problem in `prometheus/`, `json_exporter/` or `blackbox/`: a file does not parse, a config names `players.json`, adds a label tied to a player, sets a password or a secret header inline, uses an address outside loopback and the documentation ranges, or asks an exporter for a module it does not have; or `promtool check config` failed. The unit tests run it in `ci / lint-test`, the `promtool` job runs it with `--require-promtool`. |
-| **Impact** | The pull request must not be merged: the change would ship a broken config or one that collects data about players. |
-| **Diagnosis** | Each finding names the file, the check and the cause, for example `prometheus/scrape/fxserver.yml: [labels] job fxserver_perf static label: label 'player' could identify a player`. Reproduce with `python3 scripts/check_pack.py` (with promtool 3.15.0 on the `PATH` for the promtool part). |
-| **Mitigation** | Fix the config in the same pull request. |
-| **Fix** | Follow the message; [metrics reference](metrics.md#not-collected) lists what the pack never collects and why. A parse finding about unsupported YAML means: write the value the way the other configs do (quoted strings, `true`/`false`, one-line flow lists) ([ADR 0011](adr/0011-pack-check-in-standard-library-python.md)). An `[addresses]` finding in a copy with the addresses of your servers is expected: check that copy with `--allow-any-address`; in this repository, use loopback or the documentation ranges. |
-
-## Failure: the dashboard check fails
-
-| | |
-|---|---|
-| **Meaning** | `python3 scripts/lint_dashboards.py` found a problem in `grafana/dashboards/`: a file does not parse or is not in the repository's format, a title contains a platform or vendor mark, a panel stores a data source uid or a variable stores a selection, a query reads a metric that is not in `docs/metrics.md`, uses a label that could identify a player or the `instance` label, is not aggregated, or does not parse in promtool, a panel has no title, description or legend, or a shareable copy is missing or outdated. The unit tests run it in `ci / lint-test`, the `promtool` job runs it with `--require-promtool`. |
-| **Impact** | The pull request must not be merged: the dashboard would break on import, show data about players or host addresses, or read series the pack does not describe. |
-| **Diagnosis** | Each finding names the file, the check, the panel and the query, for example `grafana/dashboards/game-server-overview.json: [metrics] panel 3 ('Players') query A: metric 'fxserver_players' is not in docs/metrics.md`. Reproduce with `python3 scripts/lint_dashboards.py` (with promtool 3.15.0 on the `PATH` for the promtool part). |
-| **Mitigation** | Fix the dashboard in the same pull request. |
-| **Fix** | Follow the message. For a new metric, add it to a table of the [metrics reference](metrics.md) first; after any change run `python3 scripts/lint_dashboards.py --fix`, which writes the shareable copy ([ADR 0019](adr/0019-dashboard-check-in-standard-library-python.md)). |
-
-## Failure: the `exporters` job fails
-
-| | |
-|---|---|
-| **Meaning** | A download did not match its pinned sha256, or `scripts/smoke_exporters.py` reported a failed check: an exporter rejected its config, a target was not up, a metric, label or value was not as documented, a probe failed, the fake server received a `players.json` request, a rule file was not loaded or a rule did not evaluate, or the rules did not react as expected to the healthy server, to the tick-time spike or to the stopped server. |
-| **Impact** | The pull request should not be merged: the configs would not deliver the documented metrics, or the rules would not work on them. |
-| **Diagnosis** | The job log lists every check with `ok` or `FAIL` and ends with the last lines of each process's log. Reproduce with the binaries from the [toolchain page](toolchain.md) and `python3 scripts/smoke_exporters.py --bin-dir bin`; the ports 30120, 7979 and 9115 must be free. |
-| **Mitigation** | Fix the config, the rule, the fake server or the expectation in the same pull request. |
-| **Fix** | When a change of names or labels is intended, update `docs/metrics.md` and `EXPECTED_METRICS` in the script together; `tests/test_pack_repo.py` checks that both match the configs. When a rule changes on purpose, change the script's expectations with it (`RECORDED`, the alert labels in `rule_checks`). For checksum errors, take the version and the sha256 from the same release ([toolchain](toolchain.md)). |

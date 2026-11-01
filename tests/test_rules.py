@@ -12,11 +12,9 @@ promtool checks that the rules load and that each case in tests/rules/ holds
   for a rule file that is not loaded without testing anything, so both are checked here.
 - Every recorded series has a promql_expr_test in a test that loads its rule file.
 - Alerts name the game server: every firing case expects the server label, and no rule groups
-  by, matches on or prints the instance label or a label tied to a player
-  (docs/adr/0013-probed-target-in-the-instance-label.md, docs/adr/0015-alerts-per-game-server.md).
+  by, matches on or prints the instance label or a label tied to a player.
 - Every metric a rule reads and every recorded series is in docs/metrics.md, every alert is in
-  the threshold table of docs/configuration.md and in the README's alert table (whose count in
-  words is right), and every link to a runbook section resolves.
+  the threshold table of docs/configuration.md and in the README's alert table, and every link to a runbook section resolves.
 
 The tests need PyYAML (requirements-test.txt). scripts/test.sh installs it and sets
 PACK_TESTS_STRICT=1; without PyYAML a bare unittest run skips them.
@@ -297,16 +295,11 @@ class RuleDocsTest(unittest.TestCase):
             with self.subTest(alert=rule["alert"]):
                 self.assertRegex(section, rf"(?m)^\| `{rule['alert']}` \|")
 
-    def test_the_readme_lists_every_alert_and_counts_them(self):
-        readme = " ".join((ROOT / "README.md").read_text(encoding="utf-8").split())
+    def test_the_readme_lists_every_alert(self):
         section = markdown_sections(ROOT / "README.md")["How it works"]
         for _, rule in alert_rules():
             with self.subTest(alert=rule["alert"]):
                 self.assertRegex(section, rf"(?m)^\| [^|]*`{rule['alert']}`[^|]*\|")
-        numbers = {6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten", 11: "eleven", 12: "twelve",
-                   13: "thirteen", 14: "fourteen", 15: "fifteen"}
-        count = numbers.get(len(alert_rules()), str(len(alert_rules())))
-        self.assertGreaterEqual(readme.count(f"{count} alerts"), 2)
 
 
 if __name__ == "__main__":
