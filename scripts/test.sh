@@ -19,7 +19,7 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-# Keep equal to the defaults in .github/workflows/reusable-gitleaks.yml and docs/toolchain.md
+# Keep equal to the defaults in .github/workflows/reusable-gitleaks.yml
 # (tests/test_pack_repo.py compares them; bumped by hand, monthly).
 GITLEAKS_VERSION=8.30.1
 GITLEAKS_SHA256=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb

@@ -5,8 +5,7 @@ collected from outside the server process: Prometheus scrapes `/perf/` on the ga
 and asks json_exporter and blackbox_exporter for the rest
 ([`prometheus/scrape/fxserver.yml`](../prometheus/scrape/fxserver.yml)). Counts only: no series
 and no label holds a player's name, identifier, address or anything else tied to one player
-([Not collected](#not-collected)). How many series this makes per server:
-[cardinality budget](cardinality.md). The rules in `rules/` add
+([Not collected](#not-collected)). The rules in `rules/` add
 [recorded series](#recorded-series-rulesfxserverrecordingyml) and also read a few
 [series of other exporters](#series-the-rules-read-from-other-exporters), and the dashboard reads
 [a few more](#series-the-dashboard-reads-from-other-exporters).
@@ -24,14 +23,9 @@ The **Verified** column says what was checked for the source field on the game s
   module (only possible for the public version list, not for a game server).
 - **unverified**: an assumption; the row says which one.
 
-No row has been checked against a running FXServer yet. That needs a server with a license key;
-until then this is listed under Limitations in the README, and the [probe log](probe-log.md)
-holds the commands for that check and its empty result tables. The source files behind the rows
-were compared with those of build 37692 (commit
-[`ccd9221`](https://github.com/citizenfx/fivem/tree/ccd92212b96d4633897450940a57dc61dc2bc5b2/code/components/citizen-server-impl/src)),
-the Latest build on 2026-10-22: the endpoint handlers, the tick-time histograms and the version
-string's build script are unchanged, and so is the code around `onesync_enabled` (README,
-Results).
+No row has been checked against a running FXServer yet; that needs a server with a license key.
+The same source files are unchanged in build 37692 (commit
+[`ccd9221`](https://github.com/citizenfx/fivem/tree/ccd92212b96d4633897450940a57dc61dc2bc5b2/code/components/citizen-server-impl/src)).
 
 The exported side is checked for every row except the optional tunnel probe:
 `scripts/smoke_exporters.py` (the CI job `exporters`) runs Prometheus 3.15.0, json_exporter 0.8.0
@@ -43,8 +37,7 @@ recorded series of the rules.
 Every series also has the labels `job` (the scrape job) and `instance` (for `/perf/` the
 `host:port`, for the exporter jobs the probed URL or address). `server` is the label you set per
 game server in the scrape config. Because `instance` can hold a host address or hostname, shared
-views group by `server` and leave `instance` out
-([ADR 0013](adr/0013-probed-target-in-the-instance-label.md)).
+views group by `server` and leave `instance` out.
 
 ## Job `fxserver_perf`: `/perf/` on the game port
 
@@ -64,8 +57,7 @@ views group by `server` and leave `instance` out
   0.150 and 0.250 seconds, plus `+Inf`: 15 bucket series per thread.
 - **Renaming:** the scrape job keeps only `tickTime_bucket`, `tickTime_sum` and `tickTime_count`
   (anything else a server version serves on `/perf/` is dropped), renames them to
-  `fxserver_tick_time_seconds_*`, copies the `name` label to `thread` and drops `name`
-  ([ADR 0010](adr/0010-rename-tick-time-to-fxserver-tick-time-seconds.md)).
+  `fxserver_tick_time_seconds_*`, copies the `name` label to `thread` and drops `name`.
 - **Access:** when `sv_prometheusBasicAuthUser` or `sv_prometheusBasicAuthPassword` is set, a
   request without exactly these Basic credentials gets `401` with the body `Unauthorized.`; when
   both are empty, `/perf/` is open to anyone, limited to 2 requests per second (burst 5) per
@@ -187,13 +179,13 @@ carries nothing about your servers.
 | `scrape_series_added` | gauge | same |
 
 Each job sets a `sample_limit`, so a target that suddenly serves more series fails its scrape
-(`up` 0) instead of filling the database ([cardinality budget](cardinality.md)).
+(`up` 0) instead of filling the database.
 
 ## Recorded series (`rules/fxserver.recording.yml`)
 
 The recording rules turn the tick-time histogram into one series per server and thread, every
 30 seconds. Their names follow the Prometheus convention `level:metric:operations`: the level
-lists the labels the series keep ([ADR 0014](adr/0014-tick-time-over-one-minute-windows.md)).
+lists the labels the series keep.
 
 | Series | Labels | Meaning |
 |---|---|---|
@@ -256,8 +248,7 @@ when a dashboard query reads a metric that is not in a table of this page.
 | `cloudflared_tunnel_total_requests`, `cloudflared_tunnel_request_errors` | the same | `server` | Tunnel requests |
 
 The names and types were read from node_exporter 1.12.1, mysqld_exporter 0.20.0 (with MariaDB
-11.8.9) and cloudflared 2026.10.2 on 2026-10-21, in the dashboard check described in the README's
-Results. cloudflared counts an edge connection in `cloudflared_tunnel_ha_connections` also while
+11.8.9) and cloudflared 2026.10.2. cloudflared counts an edge connection in `cloudflared_tunnel_ha_connections` also while
 it retries it (seen with an unreachable edge), so the dashboard shows it next to the admin
 hostname probe. Prometheus 3 adds an information notice ("metric might not be a counter") to
 `rate()` over counters whose names do not end in `_total`, such as mysqld_exporter's global status
@@ -283,16 +274,15 @@ From the source of build 35245:
 - **`players.json`, in any form.** The player count comes from `dynamic.json` `clients`. Without
   the players token (`sv_playersToken`) the server serves an anonymous entry per client there,
   with it names and identifiers; the pack needs neither, so no target, module or rule names that
-  endpoint, and `scripts/check_pack.py` fails if one does
-  ([ADR 0009](adr/0009-counts-only-from-the-status-endpoints.md)).
+  endpoint, and `scripts/check_pack.py` fails if one does.
 - **Any label tied to a player:** names, identifiers (license, Steam, Discord and so on), IP
   addresses, endpoints, pings or player IDs. `scripts/check_pack.py` rejects such label names in
   the scrape config, the relabel rules and the exporter modules, and the `exporters` run checks
   the labels that arrive in Prometheus.
 - **Everything else in `info.json` and `dynamic.json`:** project name and description, host
-  name, tags, locale, other variables, the resource list (one series per resource would break
-  the [cardinality budget](cardinality.md)), the icon and the version hash.
+  name, tags, locale, other variables, the resource list (one series per resource would be
+  too many), the icon and the version hash.
 - **txAdmin's own status endpoint:** its fields have not been checked yet, so there is no module
-  for it ([probe log](probe-log.md#txadmin-hoststatus)).
+  for it.
 - **The exporters' own `/metrics`:** not scraped by these jobs; add a job of your own if you want
   the exporters' process metrics.

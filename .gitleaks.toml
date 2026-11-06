@@ -1,8 +1,7 @@
 # gitleaks configuration: the built-in rules plus rules for game-server and chat secrets that
 # the defaults do not cover (checked against gitleaks 8.30.1's default config, 2026-10-06).
 # This repository adds the rule "cfx-license-key-any-shape" and the CHANGE_ME_... placeholders to
-# the oss-template rules, with the same rules as the luminare.gameserver collection
-# (docs/adr/0008-extra-secret-rule-for-any-cfxk-token.md).
+# the oss-template rules, with the same rules as the luminare.gameserver collection.
 # Run locally:  gitleaks git --redact --config .gitleaks.toml .
 title = "gameserver-observability gitleaks configuration"
 

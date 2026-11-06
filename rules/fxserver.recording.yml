@@ -6,9 +6,7 @@
 # One series per server and thread (svMain, svNetwork, svSync), named level:metric:operations
 # as the Prometheus documentation recommends. The windows are one minute long, so a short spike
 # stays visible and the alert's "for: 5m" means five minutes of slow ticks; that needs at least
-# two /perf/ scrapes per minute (the pack scrapes every 15 s). docs/metrics.md lists the series,
-# tests/rules/recording.test.yml tests each one, and docs/adr/0014-tick-time-over-one-minute-windows.md
-# explains the windows and the names.
+# two /perf/ scrapes per minute (the pack scrapes every 15 s). docs/metrics.md lists the series.
 groups:
   - name: fxserver-tick-time
     interval: 30s

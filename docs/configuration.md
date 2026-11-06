@@ -46,11 +46,10 @@ endpoints need no setting; a proxy between Prometheus and the server is refused 
 | `fxserver_blackbox` targets | `127.0.0.1:30120` (`tcp_connect`), `http://127.0.0.1:30120/info.json` (`http_fxserver_info`), `http://127.0.0.1:30120/perf/` (`http_401_expected`) | What blackbox_exporter probes; the `module` label selects the probe module. |
 | `replacement` of `__address__` | `127.0.0.1:7979` (json_exporter), `127.0.0.1:9115` (blackbox_exporter) | Where the exporters listen, as seen from Prometheus. |
 | `scrape_interval` | `15s` for `/perf/`, `30s` for the exporter jobs | `info.json` is rate-limited by the server (4 requests per second per address), so keep the JSON jobs at 30 seconds or more. |
-| `sample_limit` | `100`, `20`, `60` | Upper bound of series per target ([cardinality budget](cardinality.md)). |
+| `sample_limit` | `100`, `20`, `60` | Upper bound of series per target. |
 
 Never change the relabel rules of `fxserver_perf` without the pack check: they keep only the
-tick-time histogram, rename it and drop the server's `name` label
-([ADR 0010](adr/0010-rename-tick-time-to-fxserver-tick-time-seconds.md)).
+tick-time histogram, rename it and drop the server's `name` label.
 
 ### More than one game server
 
@@ -129,7 +128,7 @@ panels.
 | File | Content |
 |---|---|
 | `grafana/dashboards/game-server-overview.json` | The dashboard "Game server overview" (uid `gso-game-server-overview`), for provisioning. |
-| `grafana/dashboards/shareable/game-server-overview.json` | The same dashboard without variables (uid `gso-game-server-overview-shared`), for importing; written by `python3 scripts/lint_dashboards.py --fix` ([ADR 0018](adr/0018-dashboard-with-a-shareable-copy.md)). |
+| `grafana/dashboards/shareable/game-server-overview.json` | The same dashboard without variables (uid `gso-game-server-overview-shared`), for importing; written by `python3 scripts/lint_dashboards.py --fix`. |
 | `grafana/provisioning/dashboards/gameserver-observability.yml` | Loads the dashboards from `/var/lib/grafana/dashboards/gameserver-observability` into the Grafana folder "Game server". |
 | `grafana/provisioning/datasources/gameserver-observability.yml` | Optional: a Prometheus data source "Game server metrics" (uid `gso-prometheus`), for a Grafana that has none for the pack's metrics. |
 
@@ -173,7 +172,7 @@ python3 scripts/lint_dashboards.py --require-promtool
 The check fails on platform or vendor marks in titles, a stored data source uid or variable
 selection, a metric that is not in the [metrics reference](metrics.md), a label that could identify
 a player, the `instance` label, an address or a link outside this repository, and a shareable
-copy that does not match ([ADR 0019](adr/0019-dashboard-check-in-standard-library-python.md)).
+copy that does not match.
 
 ## json_exporter modules (`json_exporter/config.yml`)
 
@@ -204,8 +203,7 @@ else who reaches them) asks for, so they listen on loopback or a private address
 
 Load all rule files with `rule_files: [/etc/prometheus/rules/*.yml]`, or leave out the files whose
 data you do not collect. Every alert has the labels `server` and `severity` and the annotations
-`summary`, `description` and `runbook_url` (a section of the [runbook](runbook.md))
-([ADR 0015](adr/0015-alerts-per-game-server.md)).
+`summary`, `description` and `runbook_url` (a section of the [runbook](runbook.md)).
 
 | File | Rules | Needs |
 |---|---|---|
@@ -222,12 +220,12 @@ The thresholds:
 | `FXServerDown` | `fxserver.alerts.yml` | the probe `tcp_connect` or `http_fxserver_info` fails | 2 min | critical |
 | `FXServerTargetDown` | `fxserver.alerts.yml` | a target of `fxserver_perf`, `fxserver_json`, `fxserver_blackbox` or `fxserver_tunnel` cannot be scraped while the probes do not report the server as down | 10 min | warning |
 | `FXServerTickTimeHigh` | `fxserver.alerts.yml` | the `svMain` tick time's 95th percentile over a minute is above 50 ms | 5 min | warning |
-| `FXServerNoPlayersAfterRestart` | `fxserver.alerts.yml` | 0 players for 30 minutes after a restart 30 to 60 minutes ago, with players in the 30 minutes before ([ADR 0016](adr/0016-restarts-from-tick-counter-resets.md)) | none | warning |
+| `FXServerNoPlayersAfterRestart` | `fxserver.alerts.yml` | 0 players for 30 minutes after a restart 30 to 60 minutes ago, with players in the 30 minutes before | none | warning |
 | `FXServerPerfEndpointExposed` | `fxserver.alerts.yml` | `/perf/` answers a request without credentials with `2xx` | 5 min | warning |
 | `FXServerAdminHostnameUnprotected` | `fxserver.alerts.yml` | the admin hostname answers a request without a login with `2xx` | 5 min | critical |
 | `FXServerAdminHostnameProbeFailing` | `fxserver.alerts.yml` | the admin hostname probe fails for another reason | 10 min | warning |
 | `FXServerArtifactOld` | `build.alerts.yml` | the active build was switched on more than 56 days (8 weeks) ago | 1 h | warning |
-| `FXServerBuildBehindRecommended` | `build.alerts.yml` | the active build is older than every Recommended build of the last 14 days ([ADR 0017](adr/0017-build-age-and-the-recommended-build.md)) | 1 h | warning |
+| `FXServerBuildBehindRecommended` | `build.alerts.yml` | the active build is older than every Recommended build of the last 14 days | 1 h | warning |
 | `HostDiskAlmostFull` | `host.alerts.yml` | a writable filesystem is more than 85 % full (less than 15 % available) | 10 min | warning |
 | `MariaDBDown` | `mariadb.alerts.yml` | `mysql_up` is 0 | 2 min | critical |
 | `MariaDBSlowQueries` | `mariadb.alerts.yml` | more than 1 slow query a minute, averaged over 5 minutes | 10 min | warning |
@@ -242,7 +240,7 @@ it; `bash scripts/check_promtool.sh` must pass. The rule groups are evaluated ev
 
 The pack ships no Alertmanager configuration: Prometheus evaluates the rules and shows pending and
 firing alerts (Status → Alerts, the `ALERTS` series, the dashboard), and sending them to people is
-the job of your Alertmanager ([ADR 0023](adr/0023-no-alertmanager-in-0-1.md)). Point Prometheus at
+the job of your Alertmanager. Point Prometheus at
 it in `/etc/prometheus/prometheus.yml`:
 
 ```yaml
@@ -272,10 +270,7 @@ receivers:
 
 The two receivers are empty here, so they deliver nothing; add your mail, chat or webhook
 settings to them in your own configuration, and keep their passwords, tokens and webhook URLs out
-of git. On 2026-10-22, `amtool check-config` (amtool 0.34.1) accepted this file,
-`amtool config routes test --config.file=alertmanager.yml severity=critical` printed `on-call`,
-and the `alerting` block above passed `promtool check config` together with the pack's rule
-files.
+of git.
 
 ## Fake game server (`demo/fake-fxserver/fake_fxserver.py`)
 
@@ -312,11 +307,6 @@ settings and how often each path was requested.
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `TEST_VENV` (environment, `scripts/test.sh`) | path | in CI `$RUNNER_TEMP/gameserver-observability-test-venv`, elsewhere `${XDG_CACHE_HOME:-~/.cache}/gameserver-observability/test-venv` | Where the test script keeps its virtual environment. It is reused if it exists and belongs to the current user (otherwise the script stops with an error), and created again if it has no working pip; the requirements are installed again on every run. |
-| `test-command` (input in `ci.yml` and `release.yml`) | string | `bash scripts/test.sh` | The test command for `ci / lint-test` and for the release build on the tag. Both files must use the same value (a unit test checks it). |
-| `archive-name` (input in `release.yml`) | string | `gameserver-observability` | Name of the release asset `<name>-X.Y.Z.tar.gz`. |
-| `PROMTOOL_VERSION`, `PROMTOOL_SHA256` (`env:` of the `promtool` job in `ci.yml`) | string | `3.15.0`, the sha256 of its linux-amd64 tarball | The promtool download. Change both together and update [toolchain.md](toolchain.md); a unit test compares them. |
-| `PROMETHEUS_*`, `JSON_EXPORTER_*` and `BLACKBOX_EXPORTER_*`, each `_VERSION` and `_SHA256` (`env:` of the `exporters` job in `ci.yml`) | string | `3.15.0`, `0.8.0`, `0.29.0` and the sha256 of each linux-amd64 tarball | The downloads for `scripts/smoke_exporters.py`. Prometheus must equal the promtool pin; a unit test compares all of them with [toolchain.md](toolchain.md). |
-| `GITLEAKS_VERSION`, `GITLEAKS_SHA256` (variables in `scripts/test.sh`) | string | `8.30.1`, the sha256 of its linux-x64 tarball | The gitleaks download that `scripts/test.sh` makes in CI (`CI=true`), so the secret-rule tests run there. Keep them equal to the defaults in `reusable-gitleaks.yml` and to [toolchain.md](toolchain.md); a unit test compares them. |
 | `--allow-any-address` (`scripts/check_pack.py`) | flag | off | Accept any IP address instead of only loopback and the documentation ranges, for a copy of the configs with the addresses of your servers. CI never sets it. |
 | `--require-promtool` (`scripts/check_pack.py`) | flag | off | Fail when promtool is not on the `PATH`, instead of skipping `promtool check config`. The `promtool` job sets it. |
 | `--require-promtool` (`scripts/lint_dashboards.py`) | flag | off | Fail when promtool is not on the `PATH`, instead of skipping the parse of every panel query with `promtool check rules`. The `promtool` job sets it. |
@@ -342,5 +332,4 @@ leaked secret is rotated first and removed from history second.
   placeholder with `cfxk_`. Any `cfxk_` value with 20 or more key characters after the prefix
   fails the secret scan, wherever it stands in a line; the only exception is a placeholder made of
   `x` and `_` characters. Shorter values such as `cfxk_REPLACE_ME` are not reported, but they still
-  look like keys, so do not use them either
-  ([ADR 0008](adr/0008-extra-secret-rule-for-any-cfxk-token.md)).
+  look like keys, so do not use them either.

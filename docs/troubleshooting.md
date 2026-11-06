@@ -28,8 +28,8 @@ for example `TEST_VENV="$HOME/.cache/gso-test-venv" bash scripts/test.sh`.
 **Cause:** pip downloaded a file whose sha256 is not listed in `requirements-test.txt`. That
 happens when a proxy or mirror serves different files, or when the file was edited by hand.
 
-**Fix:** install from PyPI directly. If `requirements-test.in` changed, compile the file again as
-shown on the [toolchain page](toolchain.md) instead of editing hashes by hand.
+**Fix:** install from PyPI directly. If `requirements-test.in` changed, compile the file again with
+the command in its header instead of editing hashes by hand.
 
 ## `sha256sum: WARNING: 1 computed checksum did NOT match`
 
@@ -37,13 +37,13 @@ shown on the [toolchain page](toolchain.md) instead of editing hashes by hand.
 the version and the sha256 were changed separately.
 
 **Fix:** download again; when bumping promtool, take the version and the sha256 from the same
-release's `sha256sums.txt` and change both in `ci.yml` and [toolchain.md](toolchain.md).
+release's `sha256sums.txt` and change both in `ci.yml`.
 
 ## `promtool: command not found`
 
 **Cause:** `scripts/check_promtool.sh` expects promtool on the `PATH`.
 
-**Fix:** install it as shown on the [toolchain page](toolchain.md) and add its folder to the
+**Fix:** take it from the Prometheus release tarball of the version pinned in `ci.yml` and add its folder to the
 `PATH`, for example `PATH="$PWD:$PATH" bash scripts/check_promtool.sh`.
 
 ## `server returned HTTP status 401 Unauthorized` on the `fxserver_perf` target
@@ -66,7 +66,7 @@ role's `txadmin_prometheus_basic_auth` when that toggle is enabled
 
 **Cause:** the target served more series than the job's `sample_limit`, so Prometheus dropped the
 whole scrape. With the shipped configs this happens only when a server version or an exporter
-version serves many more series than measured in the [cardinality budget](cardinality.md).
+version serves many more series than before.
 
 **Fix:** look at what the target serves (for an exporter job, open its `/probe` URL with the same
 `module` and `target`), then raise the limit in the scrape job if the new series are expected.
@@ -162,7 +162,7 @@ container was recreated (for example with `docker compose up -d --force-recreate
 the others are left without a network.
 
 **Fix:** run `docker compose -f demo/docker-compose.yml up -d`; it recreates them in the new
-namespace ([ADR 0020](adr/0020-demo-stack-in-one-network-namespace.md)).
+namespace.
 
 ## `smoke_demo: the Compose project … already has N container(s)`
 
@@ -211,8 +211,7 @@ return one series per game server with its `server` label
 ## Alerts fire in Prometheus, but nobody gets a notification
 
 **Cause:** the pack evaluates alerts but sends none: Prometheus needs an `alerting` block that
-names your Alertmanager, and the Alertmanager a route for the alerts' labels
-([ADR 0023](adr/0023-no-alertmanager-in-0-1.md)).
+names your Alertmanager, and the Alertmanager a route for the alerts' labels.
 
 **Fix:** add both as shown in [configuration](configuration.md#send-the-alerts-to-alertmanager).
 `curl -fsS http://127.0.0.1:9090/api/v1/alertmanagers` lists the Alertmanagers Prometheus sends
