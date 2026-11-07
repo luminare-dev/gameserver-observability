@@ -17,10 +17,30 @@ jobs:
   scorecard:
     # Private repositories (part A of PUBLISHING.md, until the gate passes) are skipped: the action
     # and the code-scanning upload need GitHub Advanced Security there.
-    if: ${{ !github.event.repository.private }}
+    needs: visibility
+    if: ${{ needs.visibility.outputs.private == 'false' }}
     uses: ./.github/workflows/reusable-scorecard.yml
     permissions:
       contents: read           # read the repository
       actions: read            # read workflow runs for the checks
       security-events: write   # upload the SARIF file to code scanning
       id-token: write          # sign the published results
+
+  visibility:
+    # The payload of a scheduled run carries no repository, so "github.event.repository.private" is
+    # empty there and cannot skip a private repository. This job asks the API on every trigger.
+    name: visibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read   # read the repository's own settings (its visibility)
+    outputs:
+      private: ${{ steps.repo.outputs.private }}
+    steps:
+      - name: Is the repository private?
+        id: repo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          private="$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)"
+          echo "private=$private" >> "$GITHUB_OUTPUT"
