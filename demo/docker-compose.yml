@@ -37,7 +37,7 @@ services:
   # The simulated game server: synthetic data on the endpoints the pack reads, /perf/ behind
   # basic auth, and the load knob on /fake/control (docs/demo.md).
   fxserver:
-    image: python:3.13-slim@sha256:cf50a4f6ac4f026458b08d5222023d700ac806410dff5e9ca8728fa44f2b850f
+    image: python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90
     network_mode: service:prometheus
     init: true
     user: "65534:65534"
