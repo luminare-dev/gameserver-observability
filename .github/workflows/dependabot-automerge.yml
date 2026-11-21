@@ -1,0 +1,75 @@
+# Approves Dependabot's patch and minor updates and turns on auto-merge (squash); GitHub merges
+# once the required checks pass. Majors, 0.x minors and updates without a semver type (image
+# digests) stay for a manual review. The update types come from the metadata block of
+# Dependabot's commit message, the same source dependabot/fetch-metadata reads.
+name: dependabot-automerge
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions: {}
+
+concurrency:
+  group: dependabot-automerge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  automerge:
+    name: automerge
+    if: >-
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Approve and enable auto-merge for patch and minor updates
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          commits="$(gh api "repos/$REPO/pulls/$PR_NUMBER/commits?per_page=100")"
+          authors="$(jq -r '[.[].author.login // "unknown"] | unique | join(",")' <<<"$commits")"
+          if [ "$authors" != "dependabot[bot]" ]; then
+            echo "::notice::Commits by $authors; left for a manual review."
+            exit 0
+          fi
+          export MESSAGE
+          MESSAGE="$(jq -r '.[-1].commit.message' <<<"$commits")"
+          verdict="$(python3 - <<'PY'
+          import os
+          deps, block = [], False
+          for line in os.environ["MESSAGE"].splitlines():
+              if line == "updated-dependencies:":
+                  block = True
+              elif block and line in ("...", "---", ""):
+                  break
+              elif block and line.startswith("- "):
+                  deps.append({})
+              if block and deps and ":" in line:
+                  key, _, value = line[2:].partition(":")
+                  deps[-1][key.strip()] = value.strip().strip("'\"")
+          reasons = []
+          for d in deps:
+              kind = d.get("update-type", "")
+              name = d.get("dependency-name", "?")
+              if kind not in ("version-update:semver-patch", "version-update:semver-minor"):
+                  reasons.append(f"{name}: {kind or 'no semver update type'}")
+              elif kind.endswith("minor") and d.get("dependency-version", "").startswith("0."):
+                  reasons.append(f"{name}: minor update below 1.0")
+          print("; ".join(reasons) if deps else "no update metadata")
+          PY
+          )"
+          if [ -n "$verdict" ]; then
+            echo "::notice::Left for a manual review ($verdict)."
+            exit 0
+          fi
+          url="https://github.com/$REPO/pull/$PR_NUMBER"
+          gh pr review "$url" --approve || echo "::warning::Could not approve the pull request."
+          gh pr merge "$url" --auto --squash --match-head-commit "$HEAD_SHA"

@@ -21,9 +21,14 @@ updates:
       prefix: ci
       include: scope
     labels: [dependencies]
+    open-pull-requests-limit: 5
     groups:
       actions:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
+      actions-major:
+        patterns: ["*"]
+        update-types: ["major"]
 
   - package-ecosystem: pip
     directory: /
@@ -36,9 +41,14 @@ updates:
       prefix: build
       include: scope
     labels: [dependencies]
+    open-pull-requests-limit: 5
     groups:
       dev-tools:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
+      dev-tools-major:
+        patterns: ["*"]
+        update-types: ["major"]
 
   # The demo images must stay at the versions CI tests with the pinned binaries
   # (tests/test_demo.py), so new versions are bumped by hand. Version updates are ignored
@@ -54,6 +64,7 @@ updates:
       prefix: build
       include: scope
     labels: [dependencies]
+    open-pull-requests-limit: 5
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
