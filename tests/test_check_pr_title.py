@@ -44,6 +44,13 @@ class TitleTest(unittest.TestCase):
         self.assertTrue(pt.problems("Bump the actions group", "dependabot[bot]"))
         self.assertTrue(any(p.startswith("wording") for p in pt.problems("ci(deps): Bump the pro version", "dependabot[bot]")))
 
+    def test_dependabot_may_exceed_the_length_limit(self):
+        title = ("ci(deps): Bump DavidAnson/markdownlint-cli2-action from 24.2.0 to 25.0.0 "
+                 "in the actions group across 1 directory")
+        self.assertGreater(len(title), pt.MAX_LENGTH)
+        self.assertEqual(pt.problems(title, "dependabot[bot]"), [])
+        self.assertTrue(pt.problems(title.replace("Bump", "bump"), "someone"))
+
     def test_offer_wording_is_rejected(self):
         """Release notes are built from the titles, so they must be offer-free too."""
         for title in ("feat: add pro version toggle", "docs: add donation link", "feat: coming soon page",

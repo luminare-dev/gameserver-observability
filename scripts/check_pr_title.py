@@ -26,9 +26,10 @@ from forbidden_words import check_string  # noqa: E402
 TYPES = ("feat", "fix", "docs", "refactor", "perf", "test", "style", "build", "ci", "chore", "revert", "security")
 TITLE_RE = re.compile(r"^(?P<type>[a-z]+)(?:\((?P<scope>[a-z0-9][a-z0-9._/-]*)\))?(?P<bang>!)?: (?P<subject>\S.*)$")
 MAX_LENGTH = 100
-# Bots whose titles follow Conventional Commits but start the summary with a capital ("Bump ...").
-# Only the lower-case rule is relaxed for them; format, types, length and wording still apply.
-CAPITALISED_SUMMARY_OK = ("dependabot[bot]",)
+# Bots whose titles follow Conventional Commits but start the summary with a capital ("Bump ...")
+# and can run past MAX_LENGTH ("... in the actions group across 1 directory"). Only the lower-case
+# rule and the length limit are relaxed for them; format, types and wording still apply.
+BOT_AUTHORS = ("dependabot[bot]",)
 
 
 def problems(title: str, author: str = "") -> list[str]:
@@ -45,9 +46,9 @@ def problems(title: str, author: str = "") -> list[str]:
         if subject.endswith("."):
             out.append("the summary must not end with a full stop")
         if (subject[:1].isupper() and not subject.split()[0].isupper()
-                and author not in CAPITALISED_SUMMARY_OK):
+                and author not in BOT_AUTHORS):
             out.append("the summary must start with a lower-case letter (imperative mood: 'add', 'fix')")
-    if len(title) > MAX_LENGTH:
+    if len(title) > MAX_LENGTH and author not in BOT_AUTHORS:
         out.append(f"the title is {len(title)} characters long; keep it to {MAX_LENGTH}")
     out += [f"wording: {e.split(': ', 1)[-1]}" for e in check_string(title)]
     return out
