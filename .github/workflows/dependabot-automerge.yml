@@ -61,8 +61,10 @@ jobs:
               name = d.get("dependency-name", "?")
               if kind not in ("version-update:semver-patch", "version-update:semver-minor"):
                   reasons.append(f"{name}: {kind or 'no semver update type'}")
-              elif kind.endswith("minor") and d.get("dependency-version", "").startswith("0."):
-                  reasons.append(f"{name}: minor update below 1.0")
+              elif kind.endswith("minor"):
+                  version = d.get("dependency-version", "").removeprefix("v")
+                  if not version or version.startswith("0."):
+                      reasons.append(f"{name}: minor update below 1.0 or unknown version")
           print("; ".join(reasons) if deps else "no update metadata")
           PY
           )"
